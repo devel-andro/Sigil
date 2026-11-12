@@ -92,6 +92,8 @@ public:
     bool MarkForIndexEnabled();
 
     bool InsertIdEnabled();
+    bool InsertRoleEnabled();
+    
     bool InsertHyperlinkEnabled();
 
     bool InsertSpecialCharacterEnabled();
@@ -109,7 +111,8 @@ public:
     int GetCursorPosition() const;
     int GetCursorLine() const;
     int GetCursorColumn() const;
-
+    int GetCursorCodepoint() const;
+  
     float GetZoomFactor() const;
 
     void SetZoomFactor(float new_zoom_factor);
@@ -165,12 +168,14 @@ public:
     bool NumberListChecked();
 
     bool PasteClipNumber(int clip_number);
+    bool PasteClipText(const QString& cliptext);
     bool PasteClipEntries(QList<ClipEditorModel::clipEntry *>clips);
 
     QString GetCaretElementName();
 
     void SuspendTabReloading();
     void ResumeTabReloading();
+    void ThemeChangeRefresh();
 
 public slots:
 
@@ -245,9 +250,10 @@ public slots:
     QString GetAttributeId();
     QString GetAttributeHref();
     QString GetAttributeIndexTitle();
-
+    QString GetCurrentTag();
     QString GetSelectedText();
     bool InsertId(const QString &id);
+    bool InsertRole(const QString &role);
     bool InsertHyperlink(const QString &url);
 
     void GoToLinkOrStyle();
@@ -259,6 +265,8 @@ public slots:
     void RefreshSpellingHighlighting();
 
     void HandleViewImage(const QUrl &url);
+
+    void UpdateCodeViewBookPath();
 
 signals:
 

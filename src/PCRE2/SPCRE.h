@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2021  Kevin B. Hendricks, Stratford Ontario Canada
-**  Copyright (C) 2011  John Schember <john@nachtimwald.com>
+**  Copyright (C) 2021-2025 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2011      John Schember <john@nachtimwald.com>
 **
 **  This file is part of Sigil.
 **
@@ -30,10 +30,12 @@
 
 #include <utility>
 
-#include <QtCore/QList>
-#include <QtCore/QString>
+#include <QList>
+#include <QString>
 
 using std::pair;
+
+class PyObjectPtr;
 
 /**
  * Sigil Regular Expression object.
@@ -143,7 +145,12 @@ public:
      *
      * @return true if the replacement string was created successfully.
      */
-    bool replaceText(const QString &text, const QList<std::pair<int, int>> &capture_groups_offsets, const QString &replacement_pattern, QString &out);
+    bool replaceText(const QString &text, const QList<std::pair<int, int>> &capture_groups_offsets,
+                     const QString &replacement_pattern, QString &out);
+
+    bool functionReplaceText(const QString &bookpath, const QString &text,
+                             const QList<std::pair<int, int>> &capture_groups_offsets,
+                             PyObjectPtr fsp, QString &out);
 
 private:
     MatchInfo generateMatchInfo(PCRE2_SIZE* ovector, int ovector_count);

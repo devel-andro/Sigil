@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim:ts=4:sw=4:softtabstop=4:smarttab:expandtab
 
-# Copyright (c) 2014-2020 Kevin B. Hendricks and Doug Massay
+# Copyright (c) 2014-2025 Kevin B. Hendricks and Doug Massay
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without modification,
@@ -47,7 +47,7 @@ class HunspellChecker(object):
         try:
             # First use bundled hunspell location.
             self.hunspell = cdll[hunspell_dllpath]
-        except OSError:
+        except (OSError, AttributeError):
             # No bundled (or incompatible bundled) libhunspell found.
             # found. So search for system libhunspell.
             self.hunspell = None

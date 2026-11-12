@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2020-2021 Kevin B. Hendricks Stratford, ON, Canada 
+**  Copyright (C) 2020-2025 Kevin B. Hendricks Stratford, ON, Canada 
 **
 **  This file is part of Sigil.
 **
@@ -22,11 +22,11 @@
 #ifndef TAG_LISTER
 #define TAG_LISTER
 
+#include <QStringList>
+#include <QStringView>
 #include <QList>
 
 class QString;
-class QStringRef;
-class QStringList;
 
 class TagLister
 {
@@ -35,7 +35,8 @@ public:
     struct TagInfo {
         int     pos;      // position of tag in source
         int     len;      // length of tag in source
-        QString tpath;    // path of tag names to this tag ("." joined) 
+        int     child;    // child number of this tag in its parent
+        QString tpath;    // path of tag names to this tag ("." joined)
         QString tname;    // tag name, ?xml, ?, !--, !DOCTYPE, ![CDATA[
         QString ttype;    // xmlheader, pi, comment, doctype, cdata, begin, single, end
         int     open_pos; // set if end tag to position of its corresponding begin tag
@@ -71,33 +72,39 @@ public:
     int findFirstTagOnOrAfter(int pos);
     int findOpenTagForClose(int i);
     int findCloseTagForOpen(int i);
+    int findLastOpenOrSingleTagThatContainsYou(int pos);
+    int findLastOpenTagOnOrBefore(int pos);
     int findBodyOpenTag();
     int findBodyCloseTag();
+    QString GeneratePathToTag(int pos);
 
     const QString& getSource();
 
-    static void parseAttribute(const QStringRef &tagstring, const QString &attribute_name, AttInfo& ainfo);
+    static void parseAttribute(const QStringView tagstring, const QString &attribute_name, AttInfo& ainfo);
     static QString serializeAttribute(const QString &aname, const QString &avalue);
-    static QString extractAllAttributes(const QStringRef &tagstring);
+    static QString extractAllAttributes(const QStringView tagstring);
     
 private:
     TagInfo getNext();
     void  buildTagList();
+    QString makePathToTag();
 
-    QStringRef parseML();
+    QStringView parseML();
 
-    void parseTag(const QStringRef &tagstring, TagInfo &mi);
+    void parseTag(const QStringView tagstring, TagInfo &mi);
 
     int findTarget(const QString &tgt, int p, bool after=false);
-    static int skipAnyBlanks(const QStringRef &segment, int p);
-    static int stopWhenContains(const QStringRef &segment, const QString& stopchars, int p);
+    static int skipAnyBlanks(const QStringView segment, int p);
+    static int stopWhenContains(const QStringView segment, const QString& stopchars, int p);
     
     QString        m_source;
     int            m_pos;
     int            m_next;
+    int            m_child;
     QStringList    m_TagPath;
     QList<int>     m_TagPos;
     QList<int>     m_TagLen;
+    QList<int>     m_TagChild;
     QList<TagInfo> m_Tags;
     int            m_bodyStartPos;
     int            m_bodyEndPos;

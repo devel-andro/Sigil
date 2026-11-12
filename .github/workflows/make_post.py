@@ -29,10 +29,13 @@ tags:
 
 # Map asset filename patterns to link text
 asset_patterns = {
-    'CHECKSUMS.sha256.txt'  : 'CHECKSUMS file',
-    'Windows-Setup.exe'     : 'Windows x86 download',
-    'Windows-x64-Setup.exe' : 'Windows x64 download',
-    'Mac.txz'               : 'MacOS download'
+    'CHECKSUMS.sha256.txt'     : 'CHECKSUMS file',
+    'Windows-Setup.exe'        : 'Windows x86 download',
+    'Windows-x64-Setup.exe'    : 'Windows x64 download',
+    'Windows-Legacy-Setup.exe' : 'Windows Legacy download',
+    'Mac-x86_64.txz'           : 'MacOS (Intel) download',
+    'Mac-arm64.txz'            : 'MacOS (Arm64) download',
+    'x86_64.AppImage'          : 'Linux AppImage download'
 }
 
 link = "[{}]({}){{: .btn .btn--success}}<br/>"
@@ -46,7 +49,8 @@ def get_asset_links(assets):
     for asset in assets:
         for p, t in asset_patterns.items():
             if p in asset['name']:
-                md_links.append(link.format(t, asset['browser_download_url']))
+                if not asset['name'].endswith('.zsync'):
+                    md_links.append(link.format(t, asset['browser_download_url']))
 
     print(md_links)
     return rchop('\n'.join(md_links), '<br/>')

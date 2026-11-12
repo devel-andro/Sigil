@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2021 Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2021-2024 Kevin B. Hendricks, Stratford, Ontario, Canada
 **
 **  This file is part of Sigil.
 **
@@ -53,7 +53,9 @@ public slots:
     void SetRegexOptionDotAll(bool new_state);
     void SetRegexOptionMinimalMatch(bool new_state);
     void SetRegexOptionAutoTokenise(bool new_state);
+    void SetRegexOptionUnicodeProperty(bool new_state);
     void SetOptionWrap(bool new_state);
+    void SetRegexOptionTextOnly(bool new_state);
     void DoClearAll();
 
     void closeEvent(QCloseEvent *e);
@@ -80,9 +82,10 @@ private:
     bool m_RegexOptionDotAll;
     bool m_RegexOptionMinimalMatch;
     bool m_RegexOptionAutoTokenise;
+    bool m_RegexOptionUnicodeProperty;
     bool m_OptionWrap;
+    bool m_RegexOptionTextOnly;
     bool m_ClearAll;
 };
-
 
 #endif // CONTROLS_H

@@ -7,7 +7,7 @@
     <x>0</x>
     <y>0</y>
     <width>566</width>
-    <height>93</height>
+    <height>127</height>
    </rect>
   </property>
   <property name="sizePolicy">
@@ -23,7 +23,7 @@
    <property name="spacing">
     <number>0</number>
    </property>
-   <property name="margin">
+   <property name="margin" stdset="0">
     <number>0</number>
    </property>
    <item>
@@ -38,7 +38,7 @@
       <property name="spacing">
        <number>0</number>
       </property>
-      <property name="margin">
+      <property name="margin" stdset="0">
        <number>0</number>
       </property>
       <item>
@@ -55,7 +55,7 @@
            <string>Hide Find and Replace</string>
           </property>
           <property name="styleSheet">
-           <string notr="true">border: 0px;</string>
+           <string notr="true"/>
           </property>
           <property name="text">
            <string>...</string>
@@ -79,6 +79,38 @@
          </widget>
         </item>
         <item>
+         <widget class="QToolButton" name="function">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="toolTip">
+           <string>Python Function Replace</string>
+          </property>
+          <property name="styleSheet">
+           <string notr="true"/>
+          </property>
+          <property name="text">
+           <string>f</string>
+          </property>
+          <property name="icon">
+           <iconset resource="../Resource_Files/main/main.qrc">
+            <normaloff>:/main/function.svg</normaloff>:/main/function.svg</iconset>
+          </property>
+          <property name="iconSize">
+           <size>
+            <width>24</width>
+            <height>24</height>
+           </size>
+          </property>
+          <property name="arrowType">
+           <enum>Qt::ArrowType::NoArrow</enum>
+          </property>
+         </widget>
+        </item>
+        <item>
          <spacer name="verticalSpacer">
           <property name="orientation">
            <enum>Qt::Vertical</enum>
@@ -90,42 +122,6 @@
            </size>
           </property>
          </spacer>
-        </item>
-        <item>
-         <widget class="QToolButton" name="advancedShowHide">
-          <property name="sizePolicy">
-           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-            <horstretch>0</horstretch>
-            <verstretch>0</verstretch>
-           </sizepolicy>
-          </property>
-          <property name="toolTip">
-           <string>Show/Hide Advanced Options</string>
-          </property>
-          <property name="styleSheet">
-           <string notr="true">border: 0px;</string>
-          </property>
-          <property name="text">
-           <string>...</string>
-          </property>
-          <property name="icon">
-           <iconset resource="../Resource_Files/main/main.qrc">
-            <normaloff>:/main/chevron-down.svg</normaloff>:/main/chevron-down.svg
-           </iconset>
-          </property>
-          <property name="iconSize">
-           <size>
-            <width>24</width>
-            <height>24</height>
-           </size>
-          </property>
-          <property name="autoRaise">
-           <bool>false</bool>
-          </property>
-          <property name="arrowType">
-           <enum>Qt::NoArrow</enum>
-          </property>
-         </widget>
         </item>
        </layout>
       </item>
@@ -158,6 +154,9 @@
         </item>
         <item row="0" column="1">
          <widget class="PasteTargetComboBox" name="cbFind">
+          <property name="focusPolicy">
+           <enum>Qt::StrongFocus</enum>
+          </property>
           <property name="editable">
            <bool>true</bool>
           </property>
@@ -180,8 +179,19 @@
             <verstretch>0</verstretch>
            </sizepolicy>
           </property>
+          <property name="minimumSize">
+           <size>
+            <width>44</width>
+            <height>22</height>
+           </size>
+          </property>
+          <property name="focusPolicy">
+           <enum>Qt::TabFocus</enum>
+          </property>
           <property name="toolTip">
-           <string>Find next match.</string>
+           <string>&lt;p style=&quot;padding-top: 0.5em;&quot; &gt;&lt;b&gt;Find&lt;/b&gt;&lt;/p&gt;
+
+&lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Find next match.&lt;/p&gt;</string>
           </property>
           <property name="styleSheet">
            <string notr="true"/>
@@ -189,25 +199,77 @@
           <property name="text">
            <string>Find</string>
           </property>
+          <property name="icon">
+           <iconset resource="../Resource_Files/main/main.qrc">
+            <normaloff>:/main/find.svg</normaloff>:/main/find.svg</iconset>
+          </property>
          </widget>
         </item>
         <item row="0" column="3">
-         <widget class="QToolButton" name="replaceFind">
+         <widget class="QToolButton" name="replaceCurrent">
           <property name="sizePolicy">
            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
             <horstretch>0</horstretch>
             <verstretch>0</verstretch>
            </sizepolicy>
           </property>
+          <property name="minimumSize">
+           <size>
+            <width>44</width>
+            <height>22</height>
+           </size>
+          </property>
+          <property name="focusPolicy">
+           <enum>Qt::TabFocus</enum>
+          </property>
           <property name="toolTip">
-           <string>Replace highlighted match (if any),
-then find the Next match in Code View.</string>
+           <string>&lt;p style=&quot;padding-top: 0.5em;&quot; &gt;&lt;b&gt;Replace&lt;/b&gt;&lt;/p&gt;
+
+&lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Replace highlighted match (if any) in Code View.&lt;/p&gt;</string>
           </property>
           <property name="styleSheet">
            <string notr="true"/>
           </property>
           <property name="text">
-           <string>Replace/Find</string>
+           <string>Replace</string>
+          </property>
+          <property name="icon">
+           <iconset resource="../Resource_Files/main/main.qrc">
+            <normaloff>:/main/replace.svg</normaloff>:/main/replace.svg</iconset>
+          </property>
+         </widget>
+        </item>
+        <item row="0" column="4">
+         <widget class="QToolButton" name="restart">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>44</width>
+            <height>22</height>
+           </size>
+          </property>
+          <property name="focusPolicy">
+           <enum>Qt::TabFocus</enum>
+          </property>
+          <property name="toolTip">
+           <string>&lt;p style=&quot;padding-top: 0.5em;&quot; &gt;&lt;b&gt;Restart&lt;/b&gt;&lt;/p&gt;
+
+&lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Restart current search from beginning.&lt;/p&gt;</string>
+          </property>
+          <property name="styleSheet">
+           <string notr="true"/>
+          </property>
+          <property name="text">
+           <string>Restart</string>
+          </property>
+          <property name="icon">
+           <iconset resource="../Resource_Files/main/main.qrc">
+            <normaloff>:/main/restart.svg</normaloff>:/main/restart.svg</iconset>
           </property>
          </widget>
         </item>
@@ -223,6 +285,9 @@ then find the Next match in Code View.</string>
         </item>
         <item row="1" column="1">
          <widget class="PasteTargetComboBox" name="cbReplace">
+          <property name="focusPolicy">
+           <enum>Qt::StrongFocus</enum>
+          </property>
           <property name="editable">
            <bool>true</bool>
           </property>
@@ -238,21 +303,37 @@ then find the Next match in Code View.</string>
          </widget>
         </item>
         <item row="1" column="2">
-         <widget class="QToolButton" name="replaceCurrent">
+         <widget class="QToolButton" name="replaceFind">
           <property name="sizePolicy">
            <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
             <horstretch>0</horstretch>
             <verstretch>0</verstretch>
            </sizepolicy>
           </property>
+          <property name="minimumSize">
+           <size>
+            <width>44</width>
+            <height>22</height>
+           </size>
+          </property>
+          <property name="focusPolicy">
+           <enum>Qt::TabFocus</enum>
+          </property>
           <property name="toolTip">
-           <string>Replace highlighted match (if any) in Code View.</string>
+           <string>&lt;p style=&quot;padding-top: 0.5em;&quot; &gt;&lt;b&gt;Replace/Find&lt;/b&gt;&lt;/p&gt;
+
+&lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Replace highlighted match (if any),
+then find the Next match in Code View.&lt;/p&gt;</string>
           </property>
           <property name="styleSheet">
            <string notr="true"/>
           </property>
           <property name="text">
-           <string>Replace</string>
+           <string>Replace/Find</string>
+          </property>
+          <property name="icon">
+           <iconset resource="../Resource_Files/main/main.qrc">
+            <normaloff>:/main/replace-find.svg</normaloff>:/main/replace-find.svg</iconset>
           </property>
          </widget>
         </item>
@@ -264,8 +345,20 @@ then find the Next match in Code View.</string>
             <verstretch>0</verstretch>
            </sizepolicy>
           </property>
+          <property name="minimumSize">
+           <size>
+            <width>44</width>
+            <height>22</height>
+           </size>
+          </property>
+          <property name="focusPolicy">
+           <enum>Qt::TabFocus</enum>
+          </property>
           <property name="toolTip">
-           <string>Replace all matches in Code View.</string>
+           <string>&lt;p style=&quot;padding-top: 0.5em;&quot; &gt;&lt;b&gt;Replace All&lt;/b&gt;&lt;/p&gt;
+
+&lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Replace all matches in Code View.&lt;/p&gt;
+&lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Use with SHIFT to Filter Replacements before changes are applied.&lt;/p&gt;</string>
           </property>
           <property name="styleSheet">
            <string notr="true"/>
@@ -273,9 +366,112 @@ then find the Next match in Code View.</string>
           <property name="text">
            <string>Replace All</string>
           </property>
+          <property name="icon">
+           <iconset resource="../Resource_Files/main/main.qrc">
+            <normaloff>:/main/replace-all.svg</normaloff>:/main/replace-all.svg</iconset>
+          </property>
+         </widget>
+        </item>
+        <item row="1" column="4">
+         <widget class="QToolButton" name="count">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>44</width>
+            <height>22</height>
+           </size>
+          </property>
+          <property name="focusPolicy">
+           <enum>Qt::TabFocus</enum>
+          </property>
+          <property name="toolTip">
+           <string>&lt;p style=&quot;padding-top: 0.5em;&quot; &gt;&lt;b&gt;Count All&lt;/b&gt;&lt;/p&gt;
+
+&lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Count all matches in Code View.&lt;/p&gt;
+&lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Use with SHIFT to generate a Dry Run Replace All table.&lt;/p&gt;</string>
+          </property>
+          <property name="styleSheet">
+           <string notr="true"/>
+          </property>
+          <property name="text">
+           <string>Count All</string>
+          </property>
+          <property name="icon">
+           <iconset resource="../Resource_Files/main/main.qrc">
+            <normaloff>:/main/count-all.svg</normaloff>:/main/count-all.svg</iconset>
+          </property>
          </widget>
         </item>
         <item row="2" column="0">
+         <widget class="QLabel" name="model">
+          <property name="text">
+           <string>Mode:</string>
+          </property>
+          <property name="alignment">
+           <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
+          </property>
+         </widget>
+        </item>
+        <item row="2" column="1" colspan="3">
+         <layout class="QHBoxLayout" name="modeLayout" stretch="0,0,0,0">
+          <item>
+           <widget class="QComboBox" name="cbSearchMode">
+            <property name="focusPolicy">
+             <enum>Qt::StrongFocus</enum>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="cbLookWhere">
+            <property name="focusPolicy">
+             <enum>Qt::StrongFocus</enum>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="MarkedTextIndicator">
+            <property name="focusPolicy">
+             <enum>Qt::StrongFocus</enum>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QComboBox" name="cbSearchDirection">
+            <property name="focusPolicy">
+             <enum>Qt::StrongFocus</enum>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item row="2" column="4">
+         <widget class="QLabel" name="revalid">
+          <property name="sizePolicy">
+           <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+            <horstretch>0</horstretch>
+            <verstretch>0</verstretch>
+           </sizepolicy>
+          </property>
+          <property name="minimumSize">
+           <size>
+            <width>8</width>
+            <height>22</height>
+           </size>
+          </property>
+          <property name="toolTip">
+           <string>Regex Valid?</string>
+          </property>
+          <property name="text">
+           <string/>
+          </property>
+         </widget>
+        </item>
+        <item row="3" column="0">
          <widget class="QLabel" name="optionsl">
           <property name="text">
            <string>Options:</string>
@@ -285,56 +481,68 @@ then find the Next match in Code View.</string>
           </property>
          </widget>
         </item>
-        <item row="2" column="1">
-         <layout class="QHBoxLayout" name="advancedLayout" stretch="0,0,0,0,0">
+        <item row="3" column="1" colspan="4">
+         <layout class="QHBoxLayout" name="advancedLayout" stretch="0,0,0,0,0,0,0,0">
           <item>
-           <widget class="QCheckBox" name="chkRegexOptionDotAll">
-            <property name="toolTip">
-             <string>For Regex searches, prefix your search with (?s).</string>
+           <widget class="QToolButton" name="tbRegexOptions">
+            <property name="focusPolicy">
+             <enum>Qt::TabFocus</enum>
             </property>
-            <property name="styleSheet">
-             <string notr="true"/>
+            <property name="toolTip">
+             <string>Set advanced Regex search flags / options.</string>
             </property>
             <property name="text">
-             <string>DotAll</string>
+             <string>Regex Options</string>
             </property>
            </widget>
           </item>
           <item>
-           <widget class="QCheckBox" name="chkRegexOptionMinimalMatch">
-            <property name="toolTip">
-             <string>For Regex searches, prefix your search with (?U).</string>
-            </property>
-            <property name="styleSheet">
-             <string notr="true"/>
-            </property>
+           <widget class="QLabel" name="space0">
             <property name="text">
-             <string>Minimal Match</string>
-            </property>
-           </widget>
-          </item>
-          <item>
-           <widget class="QCheckBox" name="chkRegexOptionAutoTokenise">
-            <property name="toolTip">
-             <string>For Regex searches, tokenise/escape selection when opening Find.</string>
-            </property>
-            <property name="styleSheet">
-             <string notr="true"/>
-            </property>
-            <property name="text">
-             <string>Auto-Tokenise</string>
+             <string/>
             </property>
            </widget>
           </item>
           <item>
            <widget class="QCheckBox" name="chkOptionWrap">
+            <property name="focusPolicy">
+             <enum>Qt::TabFocus</enum>
+            </property>
             <property name="toolTip">
-             <string>Search from current position to end of the 
-current file or book, and then wrap to the
+             <string>Search from current position to top or end of the
+current file and then wrap to the
 other end to continue searching.</string>
             </property>
             <property name="text">
              <string>Wrap</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="space1">
+            <property name="text">
+             <string/>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QCheckBox" name="chkOptionTextOnly">
+            <property name="focusPolicy">
+             <enum>Qt::TabFocus</enum>
+            </property>
+            <property name="toolTip">
+             <string>Search only in text (outside tags).
+Valid only when searching HTML files.</string>
+            </property>
+            <property name="text">
+             <string>Text</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="space2">
+            <property name="text">
+             <string/>
             </property>
            </widget>
           </item>
@@ -345,119 +553,8 @@ other end to continue searching.</string>
             </property>
             <property name="sizeHint" stdset="0">
              <size>
-              <width>40</width>
+              <width>16</width>
               <height>0</height>
-             </size>
-            </property>
-           </spacer>
-          </item>
-          <item>
-           <widget class="QLabel" name="revalid">
-            <property name="sizePolicy">
-             <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-              <horstretch>0</horstretch>
-              <verstretch>0</verstretch>
-             </sizepolicy>
-            </property>
-            <property name="minimumSize">
-             <size>
-              <width>2</width>
-              <height>22</height>
-             </size>
-            </property>
-            <property name="toolTip">
-             <string>Regex Valid?</string>
-            </property>
-            <property name="text">
-             <string> </string>
-            </property>
-           </widget>
-          </item>
-         </layout>
-        </item>
-        <item row="2" column="2">
-         <widget class="QToolButton" name="restart">
-          <property name="sizePolicy">
-           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-            <horstretch>0</horstretch>
-            <verstretch>0</verstretch>
-           </sizepolicy>
-          </property>
-          <property name="minimumSize">
-           <size>
-            <width>0</width>
-            <height>22</height>
-           </size>
-          </property>
-          <property name="toolTip">
-           <string>Restart current search from beginning.</string>
-          </property>
-          <property name="styleSheet">
-           <string notr="true"/>
-          </property>
-          <property name="text">
-           <string>Restart</string>
-          </property>
-         </widget>
-        </item>
-        <item row="2" column="3">
-         <widget class="QToolButton" name="count">
-          <property name="sizePolicy">
-           <sizepolicy hsizetype="Expanding" vsizetype="Expanding">
-            <horstretch>0</horstretch>
-            <verstretch>0</verstretch>
-           </sizepolicy>
-          </property>
-          <property name="minimumSize">
-           <size>
-            <width>0</width>
-            <height>22</height>
-           </size>
-          </property>
-          <property name="toolTip">
-           <string>Count all matches in Code View.</string>
-          </property>
-          <property name="styleSheet">
-           <string notr="true"/>
-          </property>
-          <property name="text">
-           <string>Count All</string>
-          </property>
-         </widget>
-        </item>
-        <item row="3" column="0">
-         <widget class="QLabel" name="model">
-          <property name="text">
-           <string>Mode:</string>
-          </property>
-          <property name="alignment">
-           <set>Qt::AlignRight|Qt::AlignTrailing|Qt::AlignVCenter</set>
-          </property>
-         </widget>
-        </item>
-        <item row="3" column="1" colspan="4">
-         <layout class="QHBoxLayout" name="modeLayout" stretch="0,0,0,0,0">
-          <item>
-           <widget class="QComboBox" name="cbSearchMode"/>
-          </item>
-          <item>
-           <widget class="QComboBox" name="cbLookWhere"/>
-          </item>
-          <item>
-           <widget class="QComboBox" name="MarkedTextIndicator"/>
-          </item>
-          <item>
-           <widget class="QComboBox" name="cbSearchDirection"/>
-          </item>
-          <item>
-           <spacer name="horizontalSpacer">
-            <property name="orientation">
-             <enum>Qt::Horizontal</enum>
-            </property>
-            <property name="sizeHint" stdset="0">
-             <size>
-              <width>40</width>
-              <height>20</height>
              </size>
             </property>
            </spacer>
@@ -466,7 +563,6 @@ other end to continue searching.</string>
            <widget class="QLabel" name="message">
             <property name="font">
              <font>
-              <weight>75</weight>
               <bold>true</bold>
              </font>
             </property>
@@ -484,15 +580,22 @@ other end to continue searching.</string>
    </item>
   </layout>
  </widget>
+ <customwidgets>
+  <customwidget>
+   <class>PasteTargetComboBox</class>
+   <extends>QComboBox</extends>
+   <header>Misc/PasteTargetComboBox.h</header>
+  </customwidget>
+ </customwidgets>
  <tabstops>
   <tabstop>cbFind</tabstop>
   <tabstop>cbReplace</tabstop>
-  <tabstop>chkRegexOptionDotAll</tabstop>
-  <tabstop>chkRegexOptionMinimalMatch</tabstop>
-  <tabstop>chkRegexOptionAutoTokenise</tabstop>
   <tabstop>cbSearchMode</tabstop>
   <tabstop>cbLookWhere</tabstop>
   <tabstop>cbSearchDirection</tabstop>
+  <tabstop>tbRegexOptions</tabstop>
+  <tabstop>chkOptionWrap</tabstop>
+  <tabstop>chkOptionTextOnly</tabstop>
   <tabstop>findNext</tabstop>
   <tabstop>replaceFind</tabstop>
   <tabstop>replaceCurrent</tabstop>
@@ -501,13 +604,6 @@ other end to continue searching.</string>
   <tabstop>count</tabstop>
   <tabstop>close</tabstop>
  </tabstops>
- <customwidgets>
-  <customwidget>
-   <class>PasteTargetComboBox</class>
-   <extends>QComboBox</extends>
-   <header>Misc/PasteTargetComboBox.h</header>
-  </customwidget>
- </customwidgets>
  <resources>
   <include location="../Resource_Files/main/main.qrc"/>
  </resources>

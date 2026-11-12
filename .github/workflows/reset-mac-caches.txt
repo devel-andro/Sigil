@@ -1,3 +1,11 @@
-Change the content of this file to reset the caches for the github actions sigil mac build
+Change the content of this file to reset the caches for the github actions sigil macOS x86_64 build
 
-cleared cache on 30 April 2021
+Changed 2024.10.23
+Changed 2025.02.05
+Changed 2025.02.28
+Changed 2025.09.15
+Changed 2025.09.19
+Changed 2025.10.06
+Changed 2026.02.08
+Changed 2026.07.14
+Changed 2026.10.07

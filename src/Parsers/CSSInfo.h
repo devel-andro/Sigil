@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2016-2021 Kevin B. Hendricks, Stratford, ON, Canada
+**  Copyright (C) 2016-2026 Kevin B. Hendricks, Stratford, ON, Canada
 **  Copyright (C) 2012 John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012 Dave Heiland
 **  Copyright (C) 2012 Grant Drake
@@ -28,9 +28,7 @@
 
 #include <QObject>
 #include <QStringList>
-#include "Parsers/qCSSParser.h"
-
-class QStringList;
+#include "Parsers/CSSParser.h"
 
 class CSSInfo : public QObject
 {
@@ -56,6 +54,8 @@ public:
     };
 
     QList<CSSSelector*> getAllSelectors();
+
+    QList<CSSSelector*> getAllSelectorsWithCombinators();
 
     /**
      * Return selectors subset for only class based CSS declarations.
@@ -96,13 +96,14 @@ public:
      */
     QString removeMatchingSelectors(QList<CSSSelector *> cssSelectors);
 
+    // QString replaceBlockComments(const QString &text);
 
 private:
     void parseStyles(const QString &text, int offsetPos);
     void generateSelectorsList();
 
     QList<CSSSelector *> m_CSSSelectors;
-    QVector<CSSParser::token> m_csstokens;
+    QVector<CSSParser::csstoken> m_csstokens;
 
     QString m_source;
     int m_posoffset;

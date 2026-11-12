@@ -14,7 +14,6 @@ on:
     - 'appveyor.yml'
     - '.retired_travis.yml'
     - '**.md'
-    - '**/reset-**-caches.txt'
 
   pull_request:
     branches: [ master ]
@@ -29,7 +28,6 @@ on:
     - 'appveyor.yml'
     - '.retired_travis.yml'
     - '**.md'
-    - '**/reset-**-caches.txt'
 
 env:
   BUILD_TYPE: Debug
@@ -37,30 +35,31 @@ env:
 jobs:
   build:
     if: "!contains(github.event.head_commit.message, '[skip ci]')"
-    runs-on: ubuntu-18.04
+    runs-on: ubuntu-24.04
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v6
 
-    - uses: actions/setup-python@v2
+    - uses: actions/setup-python@v6
       with:
-        python-version: '3.6'
+        python-version: '3.12.4'
 
     - name: Cache Qt
       id: cache-qt
-      uses: actions/cache@v2
+      uses: actions/cache@v5
       with:
         path: ${{runner.workspace}}/Qt
         key: ${{ runner.os }}-sigilqt-${{ hashFiles('**/reset-lin-caches.txt') }}
   
     - name: Install Qt
-      uses: jurplel/install-qt-action@v2
+      uses: jurplel/install-qt-action@v4
       with:
-        version: '5.9.5'
+        version: '6.4.0'
         dir: ${{runner.workspace}}/Qt
-        modules: 'qtwebengine'
+        modules: 'qtwebengine qtpositioning qtpdf qtwebchannel'
         setup-python: 'false'
-        cached: ${{ steps.cache-qt.outputs.cache-hit }}
+        cache: ${{ steps.cache-qt.outputs.cache-hit }}
+        # extra: "-b https://mirrors.dotsrc.org/qtproject"
 
     - uses: lukka/get-cmake@latest
 
@@ -79,7 +78,9 @@ jobs:
       run: |
         cmake $GITHUB_WORKSPACE \
         -G "Ninja" \
+        -DCMAKE_PREFIX_PATH="{$QT_ROOT_DIR}/lib/cmake" \
         -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
+        -DTRY_NEWER_FINDPYTHON3=1 \
         -DUSE_SYSTEM_LIBS=1 \
         -DSYSTEM_LIBS_REQUIRED=0
         ninja -j$(getconf _NPROCESSORS_ONLN)

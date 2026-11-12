@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -24,10 +24,11 @@
 #ifndef BOOKBROWSER_H
 #define BOOKBROWSER_H
 
-#include <QtCore/QSharedPointer>
+#include <QSharedPointer>
 #include <QWidget>
 #include <QPointer>
-#include <QtWidgets/QDockWidget>
+#include <QDockWidget>
+#include <QStringList>
 
 #include "BookManipulation/Book.h"
 #include "ResourceObjects/Resource.h"
@@ -41,6 +42,7 @@ class CSSResource;
 class QAction;
 class QMenu;
 class QModelIndex;
+class QPaintEvent;
 class QPoint;
 class QToolButton;
 class QTreeView;
@@ -88,6 +90,9 @@ public:
      */
     QList <Resource *> ValidSelectedCSSResources();
 
+    QList <Resource *> ValidSelectedSVGResources();
+    QList <Resource *> ValidSelectedJSResources();
+    QList <Resource *> ValidSelectedMiscXMLResources();
 
     /**
      * All HTML resources in the Book Browser in order
@@ -182,6 +187,7 @@ public slots:
     void CopyHTML();
     void CopyCSS();
     void AddNewHTML();
+    void ViewImage();
     void AddNewCSS();
     void AddNewJS();
     void AddNewSVG();
@@ -190,12 +196,14 @@ public slots:
     /**
      * Implements the Add Existing context menu action functionality.
      */
-    QStringList AddExisting(bool only_multimedia = false, bool only_images = false);
+    QStringList AddExisting(bool only_multimedia = false, bool only_images = false, QStringList already_selected = QStringList());
 
     /*
      * Sorts the HTML book entries alphanumerically
      */
     void SortHTML();
+
+    void ReorderHTML();
 
     void SelectAll();
 
@@ -213,6 +221,8 @@ public slots:
      */
     void SelectMovedResource();
 
+    void FocusOnBookBrowser();
+
     void SaveAsUrl(const QUrl &url);
 
 signals:
@@ -225,6 +235,14 @@ signals:
      * @param resource The selected resource.
      */
     void ResourceActivated(Resource *resource);
+
+    /**
+     * Emitted when the user wants to view an image in the browser.
+     *
+     * @param book:/// url to the image resource
+     */
+    
+    void ViewImageRequest(const QUrl& url);
 
     /**
      * Emitted when merging to force open tabs to close
@@ -291,7 +309,8 @@ private slots:
     void SaveAsFile(Resource *resource);
     void SaveAsFiles();
 
-    void OpenWith();
+    void OpenWithOtherApp();
+    void OpenWithClear();
 
     void OpenWithEditor(int) const;
 
@@ -345,6 +364,14 @@ private slots:
     void AddSemanticCode();
 
     /**
+     * display information on the currently
+     * selected resource.
+     */
+    QString BuildListMD(const QStringList& lst);
+    void GetInfo();
+    
+
+    /**
      * Implements the Merge context menu action functionality.
      */
     void Merge();
@@ -372,6 +399,7 @@ private slots:
 
 protected:
     virtual void showEvent(QShowEvent *event);
+    virtual void paintEvent(QPaintEvent* event);
 
 private:
     /**
@@ -466,6 +494,10 @@ private:
      */
     QList <Resource *> ValidSelectedResources(Resource::ResourceType resource_type);
 
+    QList <Resource *> ValidSelectedResourcesByMT(QStringList &mts);
+
+    bool IsCongruent(Resource::ResourceType selected_type, Resource::ResourceType candidate_type);
+
     void RefreshCounts();
 
 
@@ -519,22 +551,26 @@ private:
     QAction *m_NoObfuscationMethod;
     QAction *m_AdobesObfuscationMethod;
     QAction *m_IdpfsObfuscationMethod;
+    QAction *m_ReorderHTML;
     QAction *m_SortHTML;
     QAction *m_RenumberTOC;
     QAction *m_LinkStylesheets;
     QAction *m_LinkJavascripts;
     QAction *m_AddSemantics;
+    QAction *m_GetInfo;
     QAction *m_SaveAs;
     QAction *m_ValidateWithW3C;
+    QAction *m_ViewImage;
 
     QMenu *m_OpenWithContextMenu;
-    QAction *m_OpenWith;
+    QAction *m_OpenWithOtherApp;
+    QAction *m_OpenWithClear;
     QAction *m_OpenWithEditor0;
     QAction *m_OpenWithEditor1;
     QAction *m_OpenWithEditor2;
     QAction *m_OpenWithEditor3;
     QAction *m_OpenWithEditor4;
-
+    
     QSignalMapper *m_openWithMapper;
 
     /**
@@ -558,5 +594,3 @@ private:
 };
 
 #endif // BOOKBROWSER_H
-
-

@@ -1,6 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2019 Kevin B. Hendricks, Stratford, Ontario Canada
+**  Copyright (C) 2019-2024 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2023- Doug Massay
 **
 **  This file is part of Sigil.
 **
@@ -25,14 +26,18 @@
 
 #include <QObject>
 #include <QUrl>
-#include <QtWebEngineWidgets/QWebEnginePage>
+#include <QtWebEngineWidgets>
+#include <QtWebEngineCore>
+#include <QWebEnginePage>
+
+class QWebEngineProfile;
 
 class WebEngPage : public QWebEnginePage
 {
     Q_OBJECT
 
 public:
-    WebEngPage(QObject *parent = 0);
+    WebEngPage(QWebEngineProfile* profile=nullptr, QObject *parent = 0, bool setbackgound = true);
 
     bool acceptNavigationRequest(const QUrl & url, QWebEnginePage::NavigationType ntype, bool isMainFrame);
     void javaScriptConsoleMessage(QWebEnginePage::JavaScriptConsoleMessageLevel level, 
@@ -43,10 +48,9 @@ signals:
 
 private slots:
     void EmitLinkClicked();    
-
+  
 private:
     QUrl m_url;
 };
 
 #endif // WEBENGPAGE_H
-

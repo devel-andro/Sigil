@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2020 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2023 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -22,10 +22,12 @@
 
 #include <QDir>
 #include <QtConcurrent>
+#include <QFuture>
 #include <QDebug>
 
 #include "Misc/TempFolder.h"
 #include "Misc/SettingsStore.h"
+#include "Misc/Utility.h"
 
 TempFolder::TempFolder()
     : m_tempDir(GetNewTempFolderTemplate())
@@ -39,12 +41,26 @@ TempFolder::TempFolder()
     m_tempDir.setAutoRemove(false);
 }
 
+
+TempFolder::TempFolder(const QString base_path)
+    : m_tempDir(GetNewTempFolderTemplateFromBasePath(base_path))
+{
+    // verify m_tempDir was properly created
+    if (!m_tempDir.isValid()) {
+        qDebug() << "Error: Invalid m_tempDir" << m_tempDir.path();
+    }
+
+    // will be cleaned manually in the destructor
+    m_tempDir.setAutoRemove(false);
+}
+
+
 TempFolder::~TempFolder()
 {
     // To be super safe here ...
     // only manually delete things if the temp directory is actually valid
     if (m_tempDir.isValid()) {
-        QtConcurrent::run(DeleteFolderAndFiles, m_tempDir.path());
+        QFuture<bool> afuture = QtConcurrent::run(DeleteFolderAndFiles, m_tempDir.path());
     }
 }
 
@@ -60,10 +76,10 @@ QString TempFolder::GetPathToSigilScratchpad()
     SettingsStore ss;
     QString temp_path = ss.tempFolderHome();
     if (temp_path == "<SIGIL_DEFAULT_TEMP_HOME>") {
-        return QDir::tempPath();
+        return Utility::DefinePrefsDir() + "/workspace";
     }
     if (!QDir(temp_path).exists()) {
-        return QDir::tempPath();
+        return Utility::DefinePrefsDir() + "/workspace";;
     }
     return temp_path;
 }
@@ -74,12 +90,18 @@ QString TempFolder::GetNewTempFolderTemplate()
     SettingsStore ss;
     QString temp_path = ss.tempFolderHome();
     if (temp_path == "<SIGIL_DEFAULT_TEMP_HOME>") {
-        return QDir::tempPath() + "/Sigil-XXXXXX";;
+       return Utility::DefinePrefsDir() + "/workspace"  + "/Sigil-XXXXXX";
     }
     if (!QDir(temp_path).exists()) {
-        return QDir::tempPath() + "/Sigil-XXXXXX";;
+        return Utility::DefinePrefsDir() + "/workspace" + "/Sigil-XXXXXX";;
     }
     return temp_path + "/Sigil-XXXXXX"; 
+}
+
+
+QString TempFolder::GetNewTempFolderTemplateFromBasePath(const QString base_path)
+{
+    return base_path + "/Sigil-XXXXXX";
 }
 
 

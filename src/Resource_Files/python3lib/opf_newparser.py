@@ -1,8 +1,8 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 # vim:ts=4:sw=4:softtabstop=4:smarttab:expandtab
 
-# Copyright (c) 2014 Kevin B. Hendricks, John Schember, and Doug Massay
+# Copyright (c) 2014-2026 Kevin B. Hendricks, John Schember, and Doug Massay
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without modification,
@@ -51,6 +51,8 @@ def xmldecode(data):
     newdata = newdata.replace('&amp;', '&')
     return newdata
 
+WHITESPACE_CHARS = (' ', '\n', '\r', '\t')
+
 SPECIAL_HANDLING_TAGS = OrderedDict([
     ('?xml', ('xmlheader', -1)),
     ('!--',  ('comment', -3)),
@@ -60,6 +62,8 @@ SPECIAL_HANDLING_TAGS = OrderedDict([
 SPECIAL_HANDLING_TYPES = ['xmlheader', 'doctype', 'comment']
 
 _OPF_PARENT_TAGS = ['package', 'metadata', 'dc-metadata', 'x-metadata', 'manifest', 'spine', 'tours', 'guide', 'bindings']
+
+_DEPRECATED_METADATA_TAGS = ['dc-metadata', 'x-metadata']
 
 class Opf_Parser(object):
 
@@ -129,13 +133,17 @@ class Opf_Parser(object):
                 self.package = (ver, uid, tattr)
                 continue
             # metadata
+            if tname in _DEPRECATED_METADATA_TAGS:
+                continue;
             if tname == "metadata":
                 if self.ns_remap:
                     if not "xmlns:opf" in tattr:
                         tattr["xmlns:opf"] = "http://www.idpf.org/2007/opf"
                 self.metadata_attr = tattr
                 continue
-            if tname in ["meta", "link"] or tname.startswith("dc:") and "metadata" in prefix:
+            # allow custom defined metadata xmlns prefixed metadata too
+            # if tname in ["meta", "link"] or tname.startswith("dc:") and "metadata" in prefix:
+            if "metadata" in prefix:
                 self.metadata.append((tname, tcontent, tattr))
                 continue
             # manifest
@@ -237,13 +245,13 @@ class Opf_Parser(object):
         if ttype is None:
             # parse any attributes of begin or single tags
             while s.find('=',p) != -1 :
-                while p < n and s[p:p+1] == ' ' : p += 1
+                while p < n and s[p:p+1] in WHITESPACE_CHARS : p += 1
                 b = p
                 while p < n and s[p:p+1] != '=' : p += 1
                 aname = s[b:p].lower()
-                aname = aname.rstrip(' ')
+                aname = aname.rstrip(' \n\r\t')
                 p += 1
-                while p < n and s[p:p+1] == ' ' : p += 1
+                while p < n and s[p:p+1] in WHITESPACE_CHARS: p += 1
                 if s[p:p+1] in ('"', "'") :
                     qt = s[p:p+1]
                     p = p + 1

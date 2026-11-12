@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-**  Copyright (C) 2021 Kevin B. Hendricks, Stratford, ON Canada
+**  Copyright (C) 2021-2026 Kevin B. Hendricks, Stratford, ON Canada
 **  Based on the MetaEditor, AddMetadata Dialogs design
 **  This file is part of Sigil.
 **
@@ -37,6 +37,8 @@
 #include "Misc/SettingsStore.h"
 #include "Misc/Plugin.h"
 #include "Misc/PluginDB.h"
+#include "Misc/Utility.h"
+#include "sigil_exception.h"
 #include "Dialogs/AutomateEditor.h"
 
 
@@ -49,7 +51,7 @@ static const QString _US = QString(QChar(31)); // Ascii Unit Separator
 AutomateEditor::AutomateEditor(const QString& automate_path, QWidget *parent)
   : QDialog(parent),
     m_mainWindow(qobject_cast<MainWindow *>(parent)),
-    m_RemoveRow(new QShortcut(QKeySequence(Qt::ControlModifier + Qt::Key_Delete),this, 0, 0, Qt::WidgetWithChildrenShortcut)),
+    m_RemoveRow(new QShortcut(QKeySequence(Qt::ControlModifier | Qt::Key_Delete),this, 0, 0, Qt::WidgetWithChildrenShortcut)),
     m_automate_path(automate_path)
 {
     setupUi(this);
@@ -117,6 +119,15 @@ QString AutomateEditor::GetAutomateList()
             if (cmd.startsWith("RunSavedSearchReplaceAll")) {
                 value = cmd.mid(25,-1).trimmed();
                 cmd = "RunSavedSearchReplaceAll";
+            } else if (cmd.startsWith("OnFailedRunSavedSearchReplaceAll")) {
+                value = cmd.mid(33,-1).trimmed();
+                cmd = "OnFailedRunSavedSearchReplaceAll";
+            } else if (cmd.startsWith("OnSuccessRunSavedSearchReplaceAll")) {
+                value = cmd.mid(34,-1).trimmed();
+                cmd = "OnSuccessRunSavedSearchReplaceAll";
+            } else if (cmd.startsWith("SetPluginParameter")) {
+                value = cmd.mid(19,-1).trimmed();
+                cmd = "SetPluginParameter";
             }
             autodata << cmd + _GS + "" + _US + value + _GS + "" + _RS;
         }
@@ -128,21 +139,35 @@ QString AutomateEditor::GetAutomateList()
 QString AutomateEditor::SetNewAutomateList(QString& data) 
 {
     QString newdata = "";
+
+    if (data.isEmpty()) {
+        return newdata;
+    }
+
     QStringList dlist = data.split(_RS);
     QStringList nlist;
-    foreach(QString rc, dlist) {
-            // treat as element with content
-            QStringList parts = rc.split(_US);
-            QString value = parts.at(1);
-            QString aline = parts.at(0);
-            if (!value.isEmpty()) {
-                aline = aline + " " + value;
-            }
-            nlist << aline;
+    foreach (QString rc, dlist) {
+        if (rc.isEmpty()) {
+            continue;
+        }
+        // treat as element with content
+        QStringList parts = rc.split(_US);
+        if (parts.size() < 2) {
+            continue;
+        }
+        QString aline = parts.at(0);
+        QString value = parts.at(1);
+        if (!value.isEmpty()) {
+            aline = aline + " " + value;
+        }
+        nlist << aline;
     }
+
     newdata = nlist.join('\n');
-    if (!newdata.endsWith('\n')) newdata = newdata + "\n";
-    Utility::WriteUnicodeTextFile(newdata, m_automate_path);
+    if (!newdata.isEmpty() && !newdata.endsWith('\n')) {
+        newdata += "\n";
+    }
+
     return newdata;
 }
 
@@ -159,6 +184,15 @@ void AutomateEditor::selectTool()
     foreach(QString code, codes) {
         if (code == "RunSavedSearchReplaceAll") {
             QString content = tr("[SavedSearch full name here]");
+            insertRow(code, code, content, "");
+        } else if (code == "OnFailedRunSavedSearchReplaceAll") {
+            QString content = tr("[SavedSearch full name here]");
+            insertRow(code, code, content, "");
+        } else if (code == "OnSuccessRunSavedSearchReplaceAll") {
+            QString content = tr("[SavedSearch full name here]");
+            insertRow(code, code, content, "");
+        } else if (code == "SetPluginParameter") {
+            QString content = tr("[String parameter for next Plugin run here]");
             insertRow(code, code, content, "");
         } else {
             insertRow(code, code, "", "");
@@ -187,11 +221,26 @@ void AutomateEditor::saveData()
 
     TreeModel *model = qobject_cast<TreeModel *>(view->model());
     QString data = model->getAllModelData();
+
     qDebug() << "received from model: " << data;
+    if (data.isEmpty()) {
+        QMessageBox::warning(this, tr("Warning"), tr("Cannot save an empty automation list."));
+        QDialog::accept();
+        return;
+    }
+
     QString newdata = SetNewAutomateList(data);
-    qDebug() << "wrote out: " << newdata;
-    QDialog::accept();
+
+    try {
+        Utility::WriteUnicodeTextFile(newdata, m_automate_path);
+        qDebug() << "wrote out: " << newdata;
+        QDialog::accept();
+    } catch (CannotOpenFile& e) {
+        Utility::critical(this, tr("Error"), tr("Failed to save automation list to %1").arg(QString(e.what())));
+        return;
+    }
 }
+
 
 void AutomateEditor::reject()
 {
@@ -292,6 +341,8 @@ void AutomateEditor::loadToolElements()
     QStringList data;
     data <<
          "AddCover" << "AddCover" << tr("Add Cover to epub.") <<
+         "AddNavToSpine" << "AddNavToSpine" << tr("Add Nav to OPF Spine.") <<
+         "AddNavToSpineNonLinear" << "AddNavToSpineNonLinear" << tr("Add Nav to OPF Spine with linear='no'.") <<
          "CreateHTMLTOC" << "CreateHTMLTOC" << tr("Create HTML Table Of Contents.") <<
          "DeleteUnusedMedia" << "DeleteUnusedMedia" << tr("Delete Unused Media Resource.") <<
          "DeleteUnusedStyles" << "DeleteUnusedStyles" << tr("Delete Unused CSS Selectors.") <<
@@ -299,8 +350,11 @@ void AutomateEditor::loadToolElements()
          "GenerateTOC" << "GenerateTOC" << tr("Generate TOC from Heading Tags.") <<
          "MendPrettifyHTML" << "MendPrettifyHTML" << tr("Mend and Prettify all XHtml files.") <<
          "MendHTML" << "MendHTML"  << tr("Mend All XHtml files.") <<
+         "OnFailedRunSavedSearchReplaceAll" << "OnFailedRunSavedSearchReplaceAll" << tr("If previous search failed, run the named Saved Search.") <<
+         "OnSuccessRunSavedSearchReplaceAll" << "OnSuccessRunSavedSearchReplaceAll" << tr("If previous search had success, run the named Saved Search.") <<
          "ReformatCSSMultipleLines" << "ReformatCSSMultipleLines" << tr("Reformat All CSS to Multiple Lines format.") <<
          "ReformatCSSSingleLines" << "ReformatCSSSingleLines" << tr("Reformat All CSS to Single Lines format.") <<
+         "RemoveNavFromSpine" << "RemoveNavFromSpine" << tr("Remove Nav from OPF Spine.") <<
          "RemoveNCXGuideFromEpub3" << "RemoveNCXGuideFromEpub3" << tr("Remove NCX and OPF Guide from Epub3.") <<
          "RepoCommit" << "RepoCommit" << tr("Save a Checkpoint of the current epub.") << 
          "RunSavedSearchReplaceAll" << "RunSavedSearchReplaceAll" << tr("Run the named Saved Search with Replace All.") <<
@@ -309,8 +363,11 @@ void AutomateEditor::loadToolElements()
          "SetBookBrowserToAllHTML" << "SetBookBrowserToAllHTML" << tr("Select all HTML Files in BookBrowser") << 
          "SetBookBrowserToAllImages" << "SetBookBrowserToAllImages" << tr("Select all Image Files in BookBrowser") << 
          "SetBookBrowserToInitialSelection" << "SetBookBrowserToInitialSelection" << tr("Reset BookBrowser to its initial selection") <<
+         "SetPluginParameter" << "SetPluginParameter" << tr("set a string parameter to be passed to the next plugin.") <<
+
          "SplitOnSGFSectionMarkers" << "SplitOnSGFSectionMarkers" << tr("Split XHtml files on Sigil Section Markers") <<
          "StandardizeEpub" << "StandardizeEpub" << tr("Convert Epub layout to Sigil's historic Standard form.") <<
+         "UseStandardFileExtensions" << "UseStandardFileExtensions" << tr("Rename files to use standard file extensions for their media type.") <<
          "UpdateManifestProperties" << "UpdateManifestProperties" << tr("Update Epub3 OPF Manifest properties.") <<
          "ValidateStylesheetsWithW3C" << "ValidateStylesheetsWithW3C" << tr("Validate All Stylesheets with W3C in external browser.") <<
          "WellFormedCheckEpub" << "WellFormedCheckEpub" << tr("Perform a basic Well-Formed Check on Epub XHtml files.");
@@ -337,8 +394,7 @@ void AutomateEditor::loadPluginElements()
     }
 
     QStringList data;
-    PluginDB *pdb = PluginDB::instance();
-    QHash<QString, Plugin *> plugins = pdb->all_plugins();
+    QHash<QString, Plugin *> plugins = PluginDB::instance().all_plugins();
     QStringList plugin_names = plugins.keys();
     foreach(QString name, plugin_names) {
         QString desc = plugins[name]->get_description();

@@ -149,11 +149,6 @@
      <addaction name="actionClip18"/>
      <addaction name="actionClip19"/>
      <addaction name="actionClip20"/>
-    </widget>
-    <widget class="QMenu" name="menuClip2">
-     <property name="title">
-      <string>Cli&amp;p2</string>
-     </property>
      <addaction name="actionClip21"/>
      <addaction name="actionClip22"/>
      <addaction name="actionClip23"/>
@@ -164,6 +159,11 @@
      <addaction name="actionClip28"/>
      <addaction name="actionClip29"/>
      <addaction name="actionClip30"/>
+    </widget>
+    <widget class="QMenu" name="menuClip2">
+     <property name="title">
+      <string>Cli&amp;p2</string>
+     </property>
      <addaction name="actionClip31"/>
      <addaction name="actionClip32"/>
      <addaction name="actionClip33"/>
@@ -174,6 +174,26 @@
      <addaction name="actionClip38"/>
      <addaction name="actionClip39"/>
      <addaction name="actionClip40"/>
+     <addaction name="actionClip41"/>
+     <addaction name="actionClip42"/>
+     <addaction name="actionClip43"/>
+     <addaction name="actionClip44"/>
+     <addaction name="actionClip45"/>
+     <addaction name="actionClip46"/>
+     <addaction name="actionClip47"/>
+     <addaction name="actionClip48"/>
+     <addaction name="actionClip49"/>
+     <addaction name="actionClip50"/>
+     <addaction name="actionClip51"/>
+     <addaction name="actionClip52"/>
+     <addaction name="actionClip53"/>
+     <addaction name="actionClip54"/>
+     <addaction name="actionClip55"/>
+     <addaction name="actionClip56"/>
+     <addaction name="actionClip57"/>
+     <addaction name="actionClip58"/>
+     <addaction name="actionClip59"/>
+     <addaction name="actionClip60"/>
     </widget>
     <addaction name="actionInsertSGFSectionMarker"/>
     <addaction name="separator"/>
@@ -181,6 +201,8 @@
     <addaction name="actionInsertSpecialCharacter"/>
     <addaction name="separator"/>
     <addaction name="actionInsertId"/>
+    <addaction name="actionInsertClip"/>
+    <addaction name="actionInsertRole"/>
     <addaction name="actionInsertHyperlink"/>
     <addaction name="separator"/>
     <addaction name="actionInsertClosingTag"/>
@@ -275,6 +297,7 @@
      <addaction name="actionCountInFile"/>
     </widget>
     <addaction name="actionFind"/>
+    <addaction name="actionHideFind"/>
     <addaction name="separator"/>
     <addaction name="actionFindNext"/>
     <addaction name="actionFindPrevious"/>
@@ -285,6 +308,9 @@
     <addaction name="actionReplaceAll"/>
     <addaction name="separator"/>
     <addaction name="actionCount"/>
+    <addaction name="actionDryRun"/>
+    <addaction name="actionFilterReplaceAll"/>
+    <addaction name="actionRestartSearch"/>
     <addaction name="separator"/>
     <addaction name="menuSearchCurrentFile"/>
     <addaction name="separator"/>
@@ -358,11 +384,17 @@
      <addaction name="actionUpdateManifestProperties"/>
      <addaction name="actionNCXGuideFromNav"/>
      <addaction name="actionRemoveNCXGuide"/>
+     <addaction name="actionRemoveNavFromSpine"/>
+     <addaction name="actionAddNavToSpine"/>
+     <addaction name="actionAddNavToSpineNonLinear"/>
     </widget>
     <addaction name="actionAddCover"/>
     <addaction name="actionMetaEditor"/>
     <addaction name="menuTOC"/>
     <addaction name="actionStandardize" />
+    <addaction name="actionStdFileExts" />
+    <addaction name="actionRebaseManifestIDs" />
+    <addaction name="actionUpdateManifestMediaTypes"/>
     <addaction name="actionCustomLayout" />
     <addaction name="menuIndex"/>
     <addaction name="separator"/>
@@ -381,18 +413,26 @@
    </widget>
    <widget class="QMenu" name="menuPlugins">
     <property name="title">
-     <string>Plugins</string>
+     <string>&amp;Plugins</string>
     </property>
     <addaction name="actionManage_Plugins"/>
    </widget>
    <widget class="QMenu" name="menuCheckpoints">
     <property name="title">
-     <string>Checkpoints</string>
+     <string>Chec&amp;kpoints</string>
     </property>
     <addaction name="actionCommit"/>
     <addaction name="actionCheckout"/>
     <addaction name="actionDiff"/>
     <addaction name="actionManageRepo"/>
+    <addaction name="actionEditCheckpointDesc"/>
+    <addaction name="actionLog"/>
+   </widget>
+   <widget class="QMenu" name="menuAutomate">
+    <property name="title">
+     <string>&amp;Automation</string>
+    </property>
+    <addaction name="actionManage_AutomateLists"/>
    </widget>
    <addaction name="menuFile"/>
    <addaction name="menuEdit"/>
@@ -404,6 +444,7 @@
    <addaction name="menuWindow"/>
    <addaction name="menuPlugins"/>
    <addaction name="menuCheckpoints"/>
+   <addaction name="menuAutomate"/>
    <addaction name="menuHelp"/>
   </widget>
 
@@ -553,6 +594,8 @@
    <addaction name="actionInsertFile"/>
    <addaction name="actionInsertSpecialCharacter"/>
    <addaction name="actionInsertId"/>
+   <addaction name="actionInsertClip"/>
+   <addaction name="actionInsertRole"/>
    <addaction name="actionInsertHyperlink"/>
   </widget>
   <widget class="QToolBar" name="toolBarBack">
@@ -565,6 +608,7 @@
    <attribute name="toolBarBreak">
     <bool>false</bool>
    </attribute>
+   <addaction name="actionBookmarkLocation"/>
    <addaction name="actionGoBackFromLinkOrStyle"/>
   </widget>
   <widget class="QToolBar" name="toolBarDonate">
@@ -636,39 +680,9 @@
    <attribute name="toolBarBreak">
     <bool>false</bool>
    </attribute>
-   <widget class="QToolButton" name="tbAutomate1">
-    <property name="icon">
-     <iconset resource="../Resource_Files/main/main.qrc">
-     <normaloff>:/main/automate_1.svg</normaloff>:/main/automate_1.svg</iconset>
-    </property>
-    <property name="toolTip">
-     <string>Automation List 1</string>
-    </property>
-    <addaction name="actionAutomate1"/>
-    <addaction name="actionAutomate1Editor"/>
-   </widget>
-   <widget class="QToolButton" name="tbAutomate2">
-    <property name="icon">
-     <iconset resource="../Resource_Files/main/main.qrc">
-     <normaloff>:/main/automate_2.svg</normaloff>:/main/automate_2.svg</iconset>
-    </property>
-    <property name="toolTip">
-     <string>Automation List 2</string>
-    </property>
-    <addaction name="actionAutomate2"/>
-    <addaction name="actionAutomate2Editor"/>
-   </widget>
-   <widget class="QToolButton" name="tbAutomate3">
-    <property name="icon">
-     <iconset resource="../Resource_Files/main/main.qrc">
-     <normaloff>:/main/automate_3.svg</normaloff>:/main/automate_3.svg</iconset>
-    </property>
-    <property name="toolTip">
-     <string>Automation List 3</string>
-    </property>
-    <addaction name="actionAutomate3"/>
-    <addaction name="actionAutomate3Editor"/>
-   </widget>
+   <addaction name="actionAutomate1"/>
+   <addaction name="actionAutomate2"/>
+   <addaction name="actionAutomate3"/>
   </widget>
   <widget class="QToolBar" name="toolBarHeadings">
    <property name="windowTitle">
@@ -823,6 +837,16 @@
    <addaction name="actionClip18"/>
    <addaction name="actionClip19"/>
    <addaction name="actionClip20"/>
+   <addaction name="actionClip21"/>
+   <addaction name="actionClip22"/>
+   <addaction name="actionClip23"/>
+   <addaction name="actionClip24"/>
+   <addaction name="actionClip25"/>
+   <addaction name="actionClip26"/>
+   <addaction name="actionClip27"/>
+   <addaction name="actionClip28"/>
+   <addaction name="actionClip29"/>
+   <addaction name="actionClip30"/>
   </widget>
   <widget class="QToolBar" name="toolBarClips2">
    <property name="windowTitle">
@@ -834,16 +858,6 @@
    <attribute name="toolBarBreak">
     <bool>true</bool>
    </attribute>
-   <addaction name="actionClip21"/>
-   <addaction name="actionClip22"/>
-   <addaction name="actionClip23"/>
-   <addaction name="actionClip24"/>
-   <addaction name="actionClip25"/>
-   <addaction name="actionClip26"/>
-   <addaction name="actionClip27"/>
-   <addaction name="actionClip28"/>
-   <addaction name="actionClip29"/>
-   <addaction name="actionClip30"/>
    <addaction name="actionClip31"/>
    <addaction name="actionClip32"/>
    <addaction name="actionClip33"/>
@@ -854,6 +868,26 @@
    <addaction name="actionClip38"/>
    <addaction name="actionClip39"/>
    <addaction name="actionClip40"/>
+   <addaction name="actionClip41"/>
+   <addaction name="actionClip42"/>
+   <addaction name="actionClip43"/>
+   <addaction name="actionClip44"/>
+   <addaction name="actionClip45"/>
+   <addaction name="actionClip46"/>
+   <addaction name="actionClip47"/>
+   <addaction name="actionClip48"/>
+   <addaction name="actionClip49"/>
+   <addaction name="actionClip50"/>
+   <addaction name="actionClip51"/>
+   <addaction name="actionClip52"/>
+   <addaction name="actionClip53"/>
+   <addaction name="actionClip54"/>
+   <addaction name="actionClip55"/>
+   <addaction name="actionClip56"/>
+   <addaction name="actionClip57"/>
+   <addaction name="actionClip58"/>
+   <addaction name="actionClip59"/>
+   <addaction name="actionClip60"/>
   </widget>
 
   <action name="actionNew">
@@ -1335,6 +1369,34 @@
 &lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Insert or edit an anchor with an ID name to use as a link target.&lt;/p&gt;</string>
    </property>
   </action>
+  <action name="actionInsertClip">
+  <property name="icon">
+    <iconset resource="../Resource_Files/main/main.qrc">
+     <normaloff>:/main/insert-aria-clip.svg</normaloff>:/main/insert-aria-clip.svg</iconset>
+   </property>
+   <property name="text">
+    <string>Aria Clip...</string>
+   </property>
+   <property name="toolTip">
+    <string>&lt;p style=&quot;padding-top: 0.5em;&quot; &gt;&lt;b&gt;Insert Aria Clip&lt;/b&gt;&lt;/p&gt;
+
+&lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Insert a Aria code clip.&lt;/p&gt;</string>
+   </property>
+  </action>
+  <action name="actionInsertRole">
+   <property name="icon">
+    <iconset resource="../Resource_Files/main/main.qrc">
+     <normaloff>:/main/insert-aria-role.svg</normaloff>:/main/insert-aria-role.svg</iconset>
+   </property>
+    <property name="text">
+    <string>Role...</string>
+   </property>
+   <property name="toolTip">
+    <string>&lt;p style=&quot;padding-top: 0.5em;&quot; &gt;&lt;b&gt;Insert Aria Role&lt;/b&gt;&lt;/p&gt;
+
+&lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Insert an Aria role and any associated epub:type.&lt;/p&gt;</string>
+   </property>
+  </action>
   <action name="actionInsertHyperlink">
    <property name="icon">
     <iconset resource="../Resource_Files/main/main.qrc">
@@ -1483,6 +1545,22 @@
     <string>Restructure Epub to Sigil Standard Form</string>
    </property>
   </action>
+  <action name="actionStdFileExts">
+   <property name="text">
+    <string>Use Standard File Extensions</string>
+   </property>
+   <property name="toolTip">
+    <string>Rename all files to use standard file extensions</string>
+   </property>
+  </action>
+    <action name="actionRebaseManifestIDs">
+   <property name="text">
+    <string>Rebase OPF Manifest IDs on Current Filenames</string>
+   </property>
+   <property name="toolTip">
+    <string>Updates each Manifest ID to reflect its current file name</string>
+   </property>
+  </action>
   <action name="actionZoomIn">
    <property name="icon">
     <iconset resource="../Resource_Files/main/main.qrc">
@@ -1528,6 +1606,16 @@
    </property>
    <property name="shortcut">
     <string>Ctrl+F</string>
+   </property>
+  </action>
+  <action name="actionHideFind">
+   <property name="text">
+    <string>&amp;Hide Find &amp;&amp; Replace...</string>
+   </property>
+   <property name="toolTip">
+    <string>&lt;p style=&quot;padding-top: 0.5em;&quot; &gt;&lt;b&gt;Hide Find &amp;amp; Replace&lt;/b&gt;&lt;/p&gt;
+
+&lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Hide the Find and Replace Window.&lt;/p&gt;</string>
    </property>
   </action>
   <action name="actionIncreaseIndent">
@@ -1650,7 +1738,7 @@
     </string>
    </property>
    <property name="shortcut">
-    <string>Alt+L</string>
+    <string>Ctrl+Alt+L</string>
    </property>
   </action>
   <action name="actionCasingUppercase">
@@ -1669,7 +1757,7 @@
     </string>
    </property>
    <property name="shortcut">
-    <string>Alt+U</string>
+    <string>Ctrl+Alt+U</string>
    </property>
   </action>
   <action name="actionCasingTitlecase">
@@ -1714,7 +1802,7 @@
     <string>&amp;Next Tab</string>
    </property>
    <property name="shortcut">
-    <string>Ctrl+PgUp</string>
+    <string>Ctrl+PgDown</string>
    </property>
   </action>
   <action name="actionPreviousTab">
@@ -1722,7 +1810,7 @@
     <string>&amp;Previous Tab</string>
    </property>
    <property name="shortcut">
-    <string>Ctrl+PgDown</string>
+    <string>Ctrl+PgUp</string>
    </property>
   </action>
   <action name="actionCloseTab">
@@ -1819,7 +1907,7 @@
 &lt;p style=&quot;margin-left: 0.5em;&quot;&gt;Find all misspelled words and allow you to add them to a dictionary or ignore them.&lt;/p&gt;</string>
    </property>
    <property name="shortcut">
-    <string>Alt+Q</string>
+    <string>Ctrl+Alt+Q</string>
    </property>
   </action>
   <action name="actionAutoSpellCheck">
@@ -1975,7 +2063,7 @@
     <string>Replace &amp;All</string>
    </property>
    <property name="shortcut">
-    <string>Alt+A</string>
+    <string>Ctrl+Alt+A</string>
    </property>
   </action>
   <action name="actionCount">
@@ -1983,7 +2071,22 @@
     <string>&amp;Count All</string>
    </property>
    <property name="shortcut">
-    <string>Alt+C</string>
+    <string>Ctrl+Alt+N</string>
+   </property>
+  </action>
+  <action name="actionDryRun">
+   <property name="text">
+    <string>Dry Run Replace All</string>
+   </property>
+  </action>
+  <action name="actionFilterReplaceAll">
+   <property name="text">
+    <string>Filter Replacements</string>
+   </property>
+  </action>
+  <action name="actionRestartSearch">
+   <property name="text">
+    <string>Restart Current Search</string>
    </property>
   </action>
   <action name="actionMarkSelection">
@@ -2388,7 +2491,166 @@
     <string>Insert Clip 40</string>
    </property>
   </action>
-
+  <action name="actionClip41">
+   <property name="text">
+    <string>Clip 41</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 41</string>
+   </property>
+  </action>
+  <action name="actionClip42">
+   <property name="text">
+    <string>Clip 42</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 42</string>
+   </property>
+  </action>
+  <action name="actionClip43">
+   <property name="text">
+    <string>Clip 43</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 43</string>
+   </property>
+  </action>
+  <action name="actionClip44">
+   <property name="text">
+    <string>Clip 44</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 44</string>
+   </property>
+  </action>
+  <action name="actionClip45">
+   <property name="text">
+    <string>Clip 45</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 45</string>
+   </property>
+  </action>
+  <action name="actionClip46">
+   <property name="text">
+    <string>Clip 46</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 46</string>
+   </property>
+  </action>
+  <action name="actionClip47">
+   <property name="text">
+    <string>Clip 47</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 47</string>
+   </property>
+  </action>
+  <action name="actionClip48">
+   <property name="text">
+    <string>Clip 48</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 48</string>
+   </property>
+  </action>
+  <action name="actionClip49">
+   <property name="text">
+    <string>Clip 49</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 49</string>
+   </property>
+  </action>
+  <action name="actionClip50">
+   <property name="text">
+    <string>Clip 50</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 50</string>
+   </property>
+  </action>
+  <action name="actionClip51">
+   <property name="text">
+    <string>Clip 51</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 51</string>
+   </property>
+  </action>
+  <action name="actionClip52">
+   <property name="text">
+    <string>Clip 52</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 52</string>
+   </property>
+  </action>
+  <action name="actionClip53">
+   <property name="text">
+    <string>Clip 53</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 53</string>
+   </property>
+  </action>
+  <action name="actionClip54">
+   <property name="text">
+    <string>Clip 54</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 54</string>
+   </property>
+  </action>
+  <action name="actionClip55">
+   <property name="text">
+    <string>Clip 55</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 55</string>
+   </property>
+  </action>
+  <action name="actionClip56">
+   <property name="text">
+    <string>Clip 56</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 56</string>
+   </property>
+  </action>
+  <action name="actionClip57">
+   <property name="text">
+    <string>Clip 57</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 57</string>
+   </property>
+  </action>
+  <action name="actionClip58">
+   <property name="text">
+    <string>Clip 58</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 58</string>
+   </property>
+  </action>
+  <action name="actionClip59">
+   <property name="text">
+    <string>Clip 59</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 59</string>
+   </property>
+  </action>
+  <action name="actionClip60">
+   <property name="text">
+    <string>Clip 60</string>
+   </property>
+   <property name="toolTip">
+    <string>Insert Clip 60</string>
+   </property>
+  </action>
   <action name="actionPreferences">
    <property name="menuRole">
     <enum>QAction::PreferencesRole</enum>
@@ -2671,13 +2933,17 @@
   </action>
   <action name="actionCreateHTMLTOC">
    <property name="text">
-    <string>&amp;Create HTML Table Of Contents</string>
+    <string>&amp;Create HTML from Table Of Contents</string>
    </property>
    <property name="toolTip">
     <string>Create a new HTML file using the current TOC.</string>
    </property>
   </action>
   <action name="actionBookmarkLocation">
+   <property name="icon">
+    <iconset resource="../Resource_Files/main/main.qrc">
+     <normaloff>:/main/bookmark.svg</normaloff>:/main/bookmark.svg</iconset>
+   </property>
    <property name="text">
     <string>Book&amp;mark Location</string>
    </property>
@@ -2727,6 +2993,7 @@
     <string>Ctrl+D</string>
    </property>
   </action>
+
   <action name="actionAutomate1">
    <property name="icon">
     <iconset resource="../Resource_Files/main/main.qrc">
@@ -2736,11 +3003,7 @@
     <string>Run Automate List 1</string>
    </property>
   </action>
-  <action name="actionAutomate1Editor">
-   <property name="text">
-    <string>Edit Automate List 1</string>
-   </property>
-  </action>
+  
   <action name="actionAutomate2">
    <property name="icon">
     <iconset resource="../Resource_Files/main/main.qrc">
@@ -2750,11 +3013,7 @@
     <string>Run Automate List 2</string>
    </property>
   </action>
-  <action name="actionAutomate2Editor">
-   <property name="text">
-    <string>Edit Automate List 2</string>
-   </property>
-  </action>
+  
   <action name="actionAutomate3">
    <property name="icon">
     <iconset resource="../Resource_Files/main/main.qrc">
@@ -2764,11 +3023,13 @@
     <string>Run Automate List 3</string>
    </property>
   </action>
-  <action name="actionAutomate3Editor">
+    
+  <action name="actionManage_AutomateLists">
    <property name="text">
-    <string>Edit Automate List 3</string>
+    <string>Manage Automation Lists</string>
    </property>
   </action>
+
   <action name="actionManage_Plugins">
    <property name="text">
     <string>Manage Plugins</string>
@@ -2891,6 +3152,11 @@
     <string>&amp;Update Manifest Properties</string>
    </property>
   </action>
+  <action name="actionUpdateManifestMediaTypes">
+   <property name="text">
+    <string>Update OPF Manifest Media Types</string>
+   </property>
+  </action>
   <action name="actionNCXGuideFromNav">
    <property name="text">
     <string>Generate &amp;NCX/Guide for epub2 e-readers</string>
@@ -2904,6 +3170,21 @@
   <action name="actionRemoveNCXGuide">
    <property name="text">
     <string>Remove the NCX and Guide</string>
+   </property>
+  </action>
+  <action name="actionRemoveNavFromSpine">
+   <property name="text">
+    <string>Remove Nav from Reading Order</string>
+   </property>
+  </action>
+  <action name="actionAddNavToSpineNonLinear">
+   <property name="text">
+    <string>Add Nav to Reading Order with linear="no"</string>
+   </property>
+  </action>
+  <action name="actionAddNavToSpine">
+   <property name="text">
+    <string>Add Nav to Reading Order</string>
    </property>
   </action>
   <action name="actionCommit">
@@ -2940,6 +3221,41 @@
    </property>
    <property name="text">
     <string>Manage Checkpoint Repositories</string>
+   </property>
+  </action>
+  <action name="actionEditCheckpointDesc">
+   <property name="text">
+    <string>Edit Checkpoint Descriptions</string>
+   </property>
+  </action>
+  <action name="actionLog">
+   <property name="text">
+    <string>Show Log of Checkpoints</string>
+   </property>
+  </action>
+  <action name="actionFocusCodeView">
+   <property name="text">
+    <string>Focus on CodeView</string>
+   </property>
+  </action>
+  <action name="actionFocusBookBrowser">
+   <property name="text">
+    <string>Focus on BookBrowser</string>
+   </property>
+  </action>
+  <action name="actionFocusPreview">
+   <property name="text">
+    <string>Focus on Preview</string>
+   </property>
+  </action>
+  <action name="actionFocusTOC">
+   <property name="text">
+    <string>Focus on Table of Contents</string>
+   </property>
+  </action>
+  <action name="actionFocusClips">
+   <property name="text">
+    <string>Focus on Clips Window</string>
    </property>
   </action>
  </widget>

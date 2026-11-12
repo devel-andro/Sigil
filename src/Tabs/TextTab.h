@@ -1,6 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2009, 2010, 2011  Strahinja Markovic  <strahinja.markovic@gmail.com>
+**  Copyright (C) 2015-2026 Kevin B. Hendricks Stratford Ontario Canada
+**  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
 **
@@ -46,6 +47,9 @@ public:
 
     ~TextTab();
 
+    bool PasteClipNumber(int clip_number);
+    bool PasteClipEntries(QList<ClipEditorModel::clipEntry *>clips);
+    
     void ScrollToLine(int line);
 
     void ScrollToPosition(int cursor_position);
@@ -69,6 +73,8 @@ public:
 
     int GetCursorColumn() const;
 
+    int GetCursorCodepoint() const;
+  
     float GetZoomFactor() const;
 
     void SetZoomFactor(float new_zoom_factor);
@@ -76,6 +82,8 @@ public:
     void UpdateDisplay();
 
     Searchable *GetSearchableContent();
+
+    bool IsLoadingFinished();
 
 public slots:
 
@@ -119,6 +127,13 @@ public slots:
     void Print();
     void PrintPreview();
 
+    void ThemeChangeRefresh();
+
+    void SaveTabContent();
+
+    void UpdateCodeViewBookPath();
+
+    
 signals:
 
     void SelectionChanged();
@@ -126,8 +141,6 @@ signals:
     void OpenClipEditorRequest(ClipEditorModel::clipEntry *clip);
 
 protected slots:
-
-    void SaveTabContent();
 
     void SaveTabContent(QWidget *editor);
 

@@ -5,27 +5,29 @@ except ImportError as e:
 import sys
 from collections import OrderedDict
 
-from pdb import set_trace
 import re
 import warnings
 from sigil_bs4.dammit import EntitySubstitution
 
 DEFAULT_OUTPUT_ENCODING = "utf-8"
 
-whitespace_re = re.compile("\s+")
+whitespace_re = re.compile(r"\s+")
 
 NON_BREAKING_INLINE_TAGS = ("a","abbr","acronym","b","bdo","big","br",
     "button","cite","code","del","dfn","em","font","i","image","img",
     "input","ins","kbd","label","map","mark", "nobr","object","q",
-    "ruby","rt","s","samp","select","small","span","strike","strong",
-    "sub","sup","textarea","tt","u","var","wbr","mbp:nu")
+    "ruby","rp","rt","s","samp","select","small","span","strike","strong",
+    "sub","sup","textarea","tt","u","var","wbr","mbp:nu",
+    "mi","mn","mo","ms","mspace","mtext","msub","msup","msubsup"
+)
 
-PRESERVE_WHITESPACE_TAGS = ("code","pre","textarea","script","style")
+PRESERVE_WHITESPACE_TAGS = ("code","pre","textarea","script","style","cs")
 
 VOID_TAGS = ("area","base","basefont","bgsound","br","col","command",
     "embed","event-source","frame","hr","img","input","keygen",
     "link","meta","param","source","spacer","track","wbr",
-    "mbp:pagebreak")
+    "mbp:pagebreak","mglyph","mspace","mprescripts","none",
+    "maligngroup","malignmark","msline")
 
 NO_ENTITY_SUB_TAGS = ("script", "style")
 
@@ -33,14 +35,21 @@ SPECIAL_HANDLING_TAGS = ("html", "body")
 
 STRUCTURAL_TAGS = ("article","aside","blockquote","body","canvas",
     "colgroup","div","dl","figure","footer","head","header","hr","html",
-    "ol","section","table","tbody","tfoot","thead","td","th","tr","ul")
+    "ol","section","table","tbody","tfoot","thead","td","th","tr","ul",
+    "math","maction","annotation","annotation-xml","menclose","mfrac",
+    "mmultiscripts","mover","mpadded","mphantom","mroot","mrow","semantics",
+    "msqrt","mstyle","mtable","mtd","mtr","munder","munderover"
+)
 
-OTHER_TEXTHOLDING_TAGS = ("address","caption","dd","div","dt","h1","h2",
+OTHER_TEXTHOLDING_TAGS = ("address","caption","dd","div","dt","figcaption","h1","h2",
     "h3","h4","h5","h6","legend","li","option","p","td","th","title")
 
 EBOOK_XML_PARENT_TAGS = ("package","metadata","manifest","spine","guide","ncx",
                          "head","doctitle","docauthor","navmap", "navpoint",
                           "navlabel", "pagelist", "pagetarget") 
+
+IS_ENTITY = re.compile(r"(&#\d+;|&#x[0-9a-fA-F]+;|&\w+;)")
+
 
 def _alias(attr):
     """Alias one attribute name to another for backward compatibility"""
@@ -98,7 +107,7 @@ class ContentMetaAttributeValue(AttributeValueWithCharsetSubstitution):
     The value of the 'content' attribute will be one of these objects.
     """
 
-    CHARSET_RE = re.compile("((^|;)\s*charset=)([^;]*)", re.M)
+    CHARSET_RE = re.compile(r"((^|;)\s*charset=)([^;]*)", re.M)
 
     def __new__(cls, original_value):
         match = cls.CHARSET_RE.search(original_value)
@@ -1107,7 +1116,7 @@ class Tag(PageElement):
 
         attrs = []
         if self.attrs:
-            for key, val in sorted(self.attrs.items()):
+            for key, val in self.attrs.items():
                 if val is None:
                     decoded = key
                 else:
@@ -1238,7 +1247,7 @@ class Tag(PageElement):
         is_xmlparent = self.name.lower() in EBOOK_XML_PARENT_TAGS
         attrs = []
         if self.attrs:
-            for key, val in sorted(self.attrs.items()):
+            for key, val in self.attrs.items():
                 if val is None:
                     decoded = key
                 else:
@@ -1324,6 +1333,15 @@ class Tag(PageElement):
                 s.append(val)
             if text:
                 text = text.strip()
+                # walk the contents and escape html named entities from xml tag contents
+                pieces = IS_ENTITY.split(text);
+                for i in range(1, len(pieces),2):
+                    piece = pieces[i]
+                    if piece not in ["&lt;", "&gt;", "&amp;"]:
+                        # not a xml base entity
+                        piece = "&amp;" + piece[1:]
+                    pieces[i] = piece
+                text = "".join(pieces)
             if text:
                 if is_xmlparent and len(s) == 0:
                     s.append(indent_chars * (indent_level - 1))
@@ -1341,7 +1359,7 @@ class Tag(PageElement):
         closeTag = ''
         attrs = []
         if self.attrs:
-            for key, val in sorted(self.attrs.items()):
+            for key, val in self.attrs.items():
                 if val is None:
                     ntext = key
                 else:
@@ -1430,7 +1448,7 @@ class Tag(PageElement):
         attribs = []
         atts = ""
         if self.attrs:
-            for key, val in sorted(self.attrs.items()):
+            for key, val in self.attrs.items():
                 if val is None:
                     decoded = key
                 else:
@@ -1683,7 +1701,7 @@ class Tag(PageElement):
 
         # Remove whitespace directly after the grouping operator ','
         # then split into tokens.
-        tokens = re.sub(',[\s]*',',', selector).split()
+        tokens = re.sub(r',[\s]*',',', selector).split()
         current_context = [self]
 
         if tokens[-1] in self._selector_combinators:
@@ -1747,7 +1765,7 @@ class Tag(PageElement):
                     if tag_name == '':
                         raise ValueError(
                             "A pseudo-class must be prefixed with a tag name.")
-                    pseudo_attributes = re.match('([a-zA-Z\d-]+)\(([a-zA-Z\d]+)\)', pseudo)
+                    pseudo_attributes = re.match(r'([a-zA-Z\d-]+)\(([a-zA-Z\d]+)\)', pseudo)
                     found = []
                     if pseudo_attributes is None:
                         pseudo_type = pseudo

@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2020 Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2015-2022 Kevin B. Hendricks, Stratford, Ontario, Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -23,8 +23,8 @@
 #include <QtWidgets/QLayout>
 #include <QtWidgets/QVBoxLayout>
 
+#include "Tabs/ContentTab.h"
 #include "ResourceObjects/Resource.h"
-#include "Tabs/FlowTab.h"
 #include "ViewEditors/Searchable.h"
 
 
@@ -38,6 +38,7 @@ ContentTab::ContentTab(Resource *resource, QWidget *parent)
     connect(resource, SIGNAL(Deleted(const Resource *)),          this, SLOT(UnderlyingResourceDeleted()));
     connect(resource, SIGNAL(Renamed(const Resource *, QString)), this, SLOT(EmitTabRenamed()));
     connect(resource, SIGNAL(Moved(const Resource *, QString)), this, SLOT(EmitTabRenamed()));
+    connect(resource, SIGNAL(TellTabUpdateName(const Resource *, QString)), this, SLOT(EmitTabRenamed()));
     m_Layout->setContentsMargins(0, 0, 0, 0);
     setLayout(m_Layout);
 }

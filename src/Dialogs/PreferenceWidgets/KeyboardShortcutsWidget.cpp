@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2011      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2011      Grzegorz Wolszczak <grzechu81@gmail.com>
 **
@@ -55,13 +55,11 @@ PreferencesWidget::ResultActions KeyboardShortcutsWidget::saveSettings()
 {
     PreferencesWidget::ResultActions results = PreferencesWidget::ResultAction_None;
 
-    KeyboardShortcutManager *sm = KeyboardShortcutManager::instance();
-
     for (int i = 0; i < ui.commandList->topLevelItemCount(); i++) {
         QTreeWidgetItem *item = ui.commandList->topLevelItem(i);
         const QString id = item->text(COL_ID);
         const QKeySequence keySequence = item->text(COL_SHORTCUT);
-        sm->setKeySequence(id, keySequence);
+        KeyboardShortcutManager::instance().setKeySequence(id, keySequence);
     }
 
     SettingsStore settings;
@@ -201,14 +199,12 @@ void KeyboardShortcutsWidget::assignButtonClickedSlot()
 
 void KeyboardShortcutsWidget::resetAllButtonClickedSlot()
 {
-    KeyboardShortcutManager *sm = KeyboardShortcutManager::instance();
-
     // Go through all items
     for (int i = 0; i < ui.commandList->topLevelItemCount(); i++) {
         QTreeWidgetItem *item = ui.commandList->topLevelItem(i);
-        QKeySequence seq = sm->keyboardShortcut(item->text(COL_ID)).defaultKeySequence();
+        QKeySequence seq = KeyboardShortcutManager::instance().keyboardShortcut(item->text(COL_ID)).defaultKeySequence();
 #ifdef Q_OS_MAC
-        item->setText(COL_SHORTCUT, seq.toString());
+        item->setText(COL_SHORTCUT, seq.toString(QKeySequence::NativeText));
 #else
         item->setText(COL_SHORTCUT, seq.toString(QKeySequence::PortableText));
 #endif
@@ -219,17 +215,16 @@ void KeyboardShortcutsWidget::resetAllButtonClickedSlot()
 
 void KeyboardShortcutsWidget::readSettings()
 {
-    KeyboardShortcutManager *sm = KeyboardShortcutManager::instance();
     ui.commandList->clear();
-    QStringList ids = sm->ids();
+    QStringList ids = KeyboardShortcutManager::instance().ids();
     foreach(QString id, ids) {
-        KeyboardShortcut shortcut = sm->keyboardShortcut(id);
+        KeyboardShortcut shortcut = KeyboardShortcutManager::instance().keyboardShortcut(id);
 
         if (!shortcut.isEmpty()) {
             QTreeWidgetItem *item = new QTreeWidgetItem();
             item->setText(COL_NAME, shortcut.name());
 #ifdef Q_OS_MAC
-            item->setText(COL_SHORTCUT, shortcut.keySequence().toString());
+            item->setText(COL_SHORTCUT, shortcut.keySequence().toString(QKeySequence::NativeText));
 #else
             item->setText(COL_SHORTCUT, shortcut.keySequence().toString(QKeySequence::PortableText));
 #endif
@@ -240,6 +235,7 @@ void KeyboardShortcutsWidget::readSettings()
         }
     }
     ui.commandList->sortItems(0, Qt::AscendingOrder);
+    ui.commandList->setAlternatingRowColors(true);
     markSequencesAsDuplicatedIfNeeded();
 
 #if defined(Q_OS_WIN32)
@@ -277,6 +273,8 @@ void KeyboardShortcutsWidget::handleKeyEvent(QKeyEvent *event)
         nextKey == Qt::Key_NumLock    ||
         nextKey == Qt::Key_ScrollLock ||
         nextKey == 0                  ||
+        nextKey == Qt::Key_Tab        ||
+        nextKey == Qt::Key_Backtab    ||
         nextKey == Qt::Key_unknown    ||
         nextKey == Qt::Key_Backspace  || // This button cannot be assigned, because we want to 'clear' shortcut after backspace push
         ui.commandList->currentItem() == 0 // Do not allow writting in shortcut line edit if no item is selected
@@ -285,11 +283,34 @@ void KeyboardShortcutsWidget::handleKeyEvent(QKeyEvent *event)
         if (nextKey == Qt::Key_Backspace) {
             removeButtonClicked();
         }
-
+        // allow tab key to shift focus since using it in shortcuts is ill advised
+        // on Windows and other platforms
+        if (nextKey == Qt::Key_Tab || nextKey == Qt::Key_Backtab) {
+            QWidget * upnext = nullptr;
+            if (nextKey == Qt::Key_Tab) {
+                if (ui.assignButton->isEnabled()) {
+                    upnext = ui.assignButton;
+                } else if (ui.removeButton->isEnabled()) {
+                    upnext = ui.removeButton;
+                } else {
+                    upnext = nextInFocusChain();
+                }
+            } else {
+                upnext = previousInFocusChain();
+            }
+            if (upnext) {
+                upnext->setFocus(Qt::TabFocusReason);
+            }
+            return;
+        }
         return;
     }
 
+#ifdef Q_OS_MAC
+    QString letter = QKeySequence(nextKey).toString(QKeySequence::NativeText);
+#else
     QString letter = QKeySequence(nextKey).toString(QKeySequence::PortableText);
+#endif
     Qt::KeyboardModifiers state = event->modifiers();
 
     DBG qDebug() << "key(): " << QString::number(nextKey) << "  " << QChar(nextKey);
@@ -335,10 +356,12 @@ void KeyboardShortcutsWidget::handleKeyEvent(QKeyEvent *event)
     if ((state & Qt::MetaModifier) && (letter.toUpper() == letter.toLower())) {
         state = state & ~Qt::SHIFT;
     }
-#endif
-
+    nextKey |= translateModifiers(state, event->text());
+    ui.targetEdit->setText(QKeySequence(nextKey).toString(QKeySequence::NativeText));
+#else // linux
     nextKey |= translateModifiers(state, event->text());
     ui.targetEdit->setText(QKeySequence(nextKey).toString(QKeySequence::PortableText));
+#endif
 
 #endif
 

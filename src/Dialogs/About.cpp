@@ -1,6 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2009, 2010, 2011  Strahinja Markovic  <strahinja.markovic@gmail.com>
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford, Ontario Canada
+**  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
 **
@@ -22,6 +23,7 @@
 #include <QtCore/QFile>
 #include <QRegularExpression>
 #include <QRegularExpressionMatch>
+#include <QTextBrowser>
 
 #include "Dialogs/About.h"
 #include "Misc/Utility.h"
@@ -48,17 +50,18 @@ About::About(QWidget *parent)
                            .arg(mo.captured(2).toInt())
                            .arg(mo.captured(3).toInt());
     ui.lbVersionDisplay->setText(version_text);
-    QString credits = "<h4>" + tr("Maintainer(s)") + "</h4>" +
+    QString credits = "<h4>" + tr("Developers(s)") + "</h4>" +
                       "<ul>" +
                       "<li>Kevin Hendricks</li>" +
                       "<li>Doug Massay</li>" +
                       "</ul>" +
-                      "<h4>" + tr("Previous Maintainer(s)") + "</h4>" +
+                      "<h4>" + tr("Previous Developer(s)") + "</h4>" +
                       "<ul>" +
                       "<li>John Schember</li>" +
                       "</ul>" +
                       "<h4>" + tr("Code Contributors") + "</h4>" +
                       "<ul>" +
+                      "<li>BeckyEbook</li>" +
                       "<li>Grant Drake</li>" +
                       "<li>Dave Heiland</li>" +
                       "<li>Charles King</li>" +
@@ -66,10 +69,11 @@ About::About(QWidget *parent)
                       "<li>Grzegorz Wolszczak</li>" +
                       "</ul>" +
                       "<h4>" + tr("Translators") + "</h4>" +
-                      "<ul><li><a href=\"https://www.transifex.com/projects/p/sigil/\">https://www.transifex.com/projects/p/sigil/</a></li></ul>" +
+                      "<ul><li><a href=\"https://explore.transifex.com/zdpo/sigil/\">https://explore.transifex.com/zdpo/sigil/</a></li></ul>" +
                       "<h4>" + tr("Original Creator") + "</h4>" +
                       "<ul><li>Strahinja Marković  (" + tr("retired") + ")</li></ul>";
-    ui.creditsDisplay->setText(credits);
+    ui.creditsDisplay->setOpenExternalLinks(true);
+    ui.creditsDisplay->setHtml(credits);
 }
 
 
@@ -91,7 +95,7 @@ QDateTime About::GetUTCBuildTime()
 // The __DATE__ macro *always* uses English month names.
 int About::MonthIndexFromString(const QString &three_letter_string)
 {
-    Q_ASSERT(three_letter_string.count() == 3);
+    Q_ASSERT(three_letter_string.length() == 3);
     Q_ASSERT(three_letter_string[ 0 ].isUpper());
 
     if (three_letter_string == "Jan") {

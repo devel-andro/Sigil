@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2021 Kevin B. Hendricks, Stratford Ontario Canada
-**  Copyright (C) 2019-2021 Doug Massay
+**  Copyright (C) 2019-2026 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2019-2023 Doug Massay
 **
 **  This file is part of Sigil.
 **
@@ -27,16 +27,19 @@
 #include <QSize>
 #include <QUrl>
 #include <QDir>
-#include <QtWebEngineWidgets/QWebEngineSettings>
-#include <QtWebEngineWidgets/QWebEngineProfile>
-#include <QtWebEngineWidgets/QWebEnginePage>
-#include <QtWebEngineWidgets/QWebEngineView>
-#include <QtWebEngineWidgets/QWebEngineScript>
+#include <QtWebEngineWidgets>
+#include <QtWebEngineCore>
+#include <QWebEngineSettings>
+#include <QWebEngineProfile>
+#include <QWebEnginePage>
+#include <QWebEngineView>
+#include <QWebEngineScript>
 #include <QApplication>
 #include <QGuiApplication>
 #include <QDebug>
 
 #include "MainUI/MainApplication.h"
+#include "Misc/WebProfileMgr.h"
 #include "Misc/SettingsStore.h"
 #include "Misc/Utility.h"
 #include "sigil_constants.h"
@@ -45,14 +48,6 @@
 #include "ViewEditors/Overlay.h"
 
 #define DBG if(0)
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    #define QT_ENUM_SKIPEMPTYPARTS Qt::SkipEmptyParts
-    #define QT_ENUM_KEEPEMPTYPARTS Qt::KeepEmptyParts
-#else
-    #define QT_ENUM_SKIPEMPTYPARTS QString::SkipEmptyParts
-    #define QT_ENUM_KEEPEMPTYPARTS QString::KeepEmptyParts
-#endif
 
 const QString SET_CURSOR_JS2 =
     "var range = document.createRange();"
@@ -86,11 +81,27 @@ struct SetJavascriptResultFunctor {
     }
 };
 
-ViewPreview::ViewPreview(QWidget *parent)
+struct HTMLResult {
+   QString res;
+   bool finished;
+   HTMLResult() : res(QString("")), finished(false) {}
+   HTMLResult(HTMLResult * pRes) : res(pRes->res),  finished(pRes->finished) {}
+   bool isFinished() { return finished; }
+ };
+
+ struct SetToHTMLResultFunctor {
+     HTMLResult * pres;
+     SetToHTMLResultFunctor(HTMLResult * pres) : pres(pres) {}
+     void operator()(const QString &result) {
+         pres->res = result;
+         pres->finished = true;
+     }
+ };
+
+ViewPreview::ViewPreview(QWidget *parent, bool setbackground)
     : QWebEngineView(parent),
       m_isLoadFinished(false),
-      m_ViewWebPage(new WebEngPage(this)),
-      c_jQuery(Utility::ReadUnicodeTextFile(":/javascript/jquery-2.2.4.min.js")),
+      c_jQuery(Utility::ReadUnicodeTextFile(":/javascript/jquery-3.6.4.min.js")),
       c_jQueryScrollTo(Utility::ReadUnicodeTextFile(":/javascript/jquery.scrollTo-2.1.2-min.js")),
       c_GetCaretLocation(Utility::ReadUnicodeTextFile(":/javascript/book_view_current_location.js")),
       m_CaretLocationUpdate(QString()),
@@ -99,30 +110,22 @@ ViewPreview::ViewPreview(QWidget *parent)
       m_LoadOkay(false),
       m_overlay(new LoadingOverlay(this))
 {
+    QWebEngineProfile* profile = WebProfileMgr::instance().GetPreviewProfile();
+    m_ViewWebPage = new WebEngPage(profile, this, setbackground);
     setPage(m_ViewWebPage);
-    // Now handled in the WebEngPage constructor to be faster
-    // page()->setBackgroundColor(Utility::WebViewBackgroundColor(true));
+    
     setContextMenuPolicy(Qt::CustomContextMenu);
     // Set the Zoom factor but be sure no signals are set because of this.
-    SettingsStore settings;
-    SetCurrentZoomFactor(settings.zoomPreview());
-    page()->settings()->setAttribute(QWebEngineSettings::ErrorPageEnabled, false);
-    page()->settings()->setAttribute(QWebEngineSettings::PluginsEnabled, false);
-    page()->settings()->setDefaultTextEncoding("UTF-8");
-    // Javascript is allowed 
-    page()->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled, (settings.javascriptOn() == 1));
-    page()->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, (settings.javascriptOn() == 1));
-    // Allow epubs to access remote resources via the net
-    page()->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, (settings.remoteOn() == 1));
-    page()->settings()->setAttribute(QWebEngineSettings::FocusOnNavigationEnabled, false);
-    // Enable local-storage for epub3
-    page()->settings()->setAttribute(QWebEngineSettings::LocalStorageEnabled, true);
-    QString localStorePath = Utility::DefinePrefsDir() + "/local-storage";
-    QDir storageDir(localStorePath);
-    if (!storageDir.exists()) {
-        storageDir.mkpath(localStorePath);
-    }
-    page()->profile()->setPersistentStoragePath(localStorePath);
+    SettingsStore ss;
+    SetCurrentZoomFactor(ss.zoomPreview());
+    
+    // Update the Preview's Profile Settings with User's Preferences
+    m_ViewWebPage->profile()->settings()->setAttribute(QWebEngineSettings::JavascriptEnabled,
+                                                       (ss.javascriptOn() == 1));
+    m_ViewWebPage->profile()->settings()->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows,
+                                                       (ss.javascriptOn() == 1));
+    m_ViewWebPage->profile()->settings()->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls,
+                                                       (ss.remoteOn() == 1));
     ConnectSignalsToSlots();
 }
 
@@ -134,6 +137,7 @@ ViewPreview::~ViewPreview()
     }
 }
 
+
 QString ViewPreview::GetCaretLocationUpdate()
 {
     StoreCaretLocationUpdate(GetCaretLocation());
@@ -144,45 +148,6 @@ QString ViewPreview::GetCaretLocationUpdate()
 QSize ViewPreview::sizeHint() const
 {
     return QSize(200, 400);
-}
-
-void ViewPreview::CustomSetDocument(const QString &path, const QString &html)
-{
-    if (html.isEmpty()) {
-        return;
-    }
-
-    m_CustomSetDocumentInProgress = true;
-
-    // If this is not the very first load of this document, store the caret location
-    if (!url().isEmpty()) {
-
-        // This next line really causes problems as it happens to interfere with later loading
-        // StoreCurrentCaretLocation();
- 
-        // keep memory footprint small clear any caches when a new page loads
-        if (url().toLocalFile() != path) {
-            page()->profile()->clearHttpCache();
-        } 
-    }
-
-    m_isLoadFinished = false;
-
-    // If Tidy is turned off, then Sigil will explode if there is no xmlns
-    // on the <html> element. So we will silently add it if needed to ensure
-    // no errors occur, to allow loading of documents created outside of
-    // Sigil as well as catering for section splits etc.
-    QString replaced_html = html;
-    replaced_html = replaced_html.replace("<html>", "<html xmlns=\"http://www.w3.org/1999/xhtml\">");
-    MainApplication *mainApplication = qobject_cast<MainApplication *>(qApp);
-    QString key = Utility::CreateUUID();
-    mainApplication->saveInPreviewCache(key, replaced_html);
-    QUrl tgturl = QUrl::fromLocalFile(path);
-    tgturl.setScheme("sigil");
-    tgturl.setHost("");
-    tgturl.setQuery("sigilpreview=" + key); 
-    page()->load(tgturl);
-    // setContent(replaced_html.toUtf8(), "application/xhtml+xml;charset=UTF-8", QUrl::fromLocalFile(path));
 }
 
 bool ViewPreview::IsLoadingFinished()
@@ -221,15 +186,6 @@ void ViewPreview::Zoom()
 
 void ViewPreview::UpdateDisplay()
 {
-#if 0
-    SettingsStore settings;
-    float stored_factor = settings.zoomWeb();
-
-    if (stored_factor != m_CurrentZoomFactor) {
-        m_CurrentZoomFactor = stored_factor;
-        Zoom();
-    }
-#endif
 }
 
 void ViewPreview::SetPreviewColors(const QString &bg, const QString &fg)
@@ -283,6 +239,7 @@ void ViewPreview::LoadingStarted()
     DBG qDebug() << "Loading a page started";
     m_isLoadFinished = false;
     m_LoadOkay = false;
+    ShowOverlay();
 }
 
 
@@ -316,6 +273,7 @@ void ViewPreview::UpdateFinishedState(bool okay)
     DBG qDebug() << "UpdateFinishedState with okay " << okay;
     // m_isLoadFinished = true;
     m_LoadOkay = okay;
+    HideOverlay();
 }
 
 void ViewPreview::HideOverlay()
@@ -328,6 +286,19 @@ void ViewPreview::ShowOverlay()
     m_overlay->show();
 }
 
+QString ViewPreview::GetHTML() const 
+ {
+     HTMLResult * pres = new HTMLResult();
+     page()->toHtml(SetToHTMLResultFunctor(pres));
+     while(!pres->isFinished()) {
+         qApp->processEvents(QEventLoop::ExcludeUserInputEvents | QEventLoop::ExcludeSocketNotifiers, 100);
+     }
+     QString res = pres->res;
+     delete pres;
+     return res;
+ }
+
+
 QVariant ViewPreview::EvaluateJavascript(const QString &javascript)
 {
     DBG qDebug() << "EvaluateJavascript: " << m_isLoadFinished;
@@ -338,7 +309,7 @@ QVariant ViewPreview::EvaluateJavascript(const QString &javascript)
     JSResult * pres = new JSResult();
     QDeadlineTimer deadline(10000);  // in milliseconds
 
-    // DBG qDebug() << "evaluate javascript" << javascript;
+    DBG qDebug() << "evaluate javascript" << javascript;
 
     page()->runJavaScript(javascript,QWebEngineScript::ApplicationWorld, SetJavascriptResultFunctor(pres));
     while(!pres->isFinished() && (!deadline.hasExpired())) {
@@ -438,9 +409,15 @@ QString ViewPreview::GetElementSelectingJS_NoTextNodes(const QList<ElementIndex>
 
 QList<ElementIndex> ViewPreview::GetCaretLocation()
 {
+#if 0
+    QDeadlineTimer deadline(1000);
+    while(!IsLoadingFinished() && (!deadline.hasExpired())) {
+        qApp->processEvents(QEventLoop::ExcludeUserInputEvents, 75);
+    }
+#endif
     // The location element hierarchy encoded in a string
     QString location_string = EvaluateJavascript(c_GetCaretLocation).toString();
-    DBG qDebug() << "GetCaretLocation: " << location_string;
+    DBG qDebug() << "ViewPreview GetCaretLocation: " << location_string;
     return ConvertQWebPathToHierarchy(location_string);
 }
 
@@ -448,7 +425,7 @@ QList<ElementIndex> ViewPreview::ConvertQWebPathToHierarchy(const QString & webp
 {
     // The location element hierarchy encoded in a string
     QString location_string = webpath;
-    QStringList elements    = location_string.split(",", QT_ENUM_SKIPEMPTYPARTS);
+    QStringList elements    = location_string.split(",", Qt::SkipEmptyParts);
     QList<ElementIndex> location;
     foreach(QString element, elements) {
         ElementIndex new_element;
@@ -503,9 +480,9 @@ QString ViewPreview::GetElementSelectingJS_WithTextNode(const QList<ElementIndex
 }
 
 
-bool ViewPreview::ExecuteCaretUpdate()
+bool ViewPreview::ExecuteCaretUpdate(bool default_to_top)
 {
-
+    Q_UNUSED(default_to_top);
     // If there is no caret location update pending...
     if (m_CaretLocationUpdate.isEmpty()) {
         return false;
@@ -530,13 +507,110 @@ bool ViewPreview::ExecuteCaretUpdate(const QString &caret_update)
     return false;
 }
 
+void ViewPreview::CustomSetDocument(const QString &path, const QString &html, bool clear_the_cache)
+{
+    if (html.isEmpty()) {
+        return;
+    }
+    m_CustomSetDocumentInProgress = true;
+    m_isLoadFinished = false;
+    m_xhtml_to_load = html;
+    m_xhtml_path = path;
+    m_using_cache_clear = clear_the_cache;
+    if (m_using_cache_clear) {
+        ClearWebCache();
+    } else {
+        ContinueCustomLoadAfterClear();
+    }
+}
+
+void ViewPreview::ClearWebCache()
+{
+    disconnect(page(), SIGNAL(loadStarted()), this, SLOT(LoadingStarted()));
+    disconnect(page(), SIGNAL(loadProgress(int)), this, SLOT(LoadingProgress(int)));
+    disconnect(page(), SIGNAL(loadFinished(bool)), this, SLOT(UpdateFinishedState(bool)));
+    disconnect(page(), SIGNAL(loadFinished(bool)), this, SLOT(WebPageJavascriptOnLoad()));
+    disconnect(page(), SIGNAL(LinkClicked(const QUrl &)), this, SIGNAL(LinkClicked(const QUrl &)));
+    disconnect(page(), SIGNAL(linkHovered(const QString &)), this, SLOT(LinkHovered(const QString &)));
+    { 
+        // to force a true fresh load (absolutely nothing cached or leftover used)  we need to
+        // setUrl(QUrl("")) first before the cache clear - but I have no idea why this is needed!
+        // Do this safely without messing up the remainder of ViewPreview's load tracking logic
+        QEventLoop loop;
+        connect(page(), &QWebEnginePage::loadFinished, &loop, &QEventLoop::quit, Qt::QueuedConnection);
+        setUrl(QUrl(""));
+        loop.exec(QEventLoop::ExcludeUserInputEvents);
+    }
+    connect(page(), SIGNAL(loadStarted()), this, SLOT(LoadingStarted()));
+    connect(page(), SIGNAL(loadProgress(int)), this, SLOT(LoadingProgress(int)));
+    connect(page(), SIGNAL(loadFinished(bool)), this, SLOT(UpdateFinishedState(bool)));
+    connect(page(), SIGNAL(loadFinished(bool)), this, SLOT(WebPageJavascriptOnLoad()));
+    connect(page(), SIGNAL(LinkClicked(const QUrl &)), this, SIGNAL(LinkClicked(const QUrl &)));
+    connect(page(), SIGNAL(linkHovered(const QString &)), this, SLOT(LinkHovered(const QString &)));
+    
+    // tried the following but the entire cache still did not clear
+    // QString html = "<html><head><title>blank<title></head><body></body></html>";
+    // setHtml(html);
+
+    DBG qDebug() <<  "clearing Preview's httpcache";
+
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+    page()->profile()->clearAllVisitedLinks();
+    page()->profile()->clearHttpCache();
+#else
+    page()->profile()->clearAllVisitedLinks();
+    page()->profile()->clearHttpCache();
+    ContinueCustomLoadAfterClear();
+#endif
+}
+
+
+void ViewPreview::ContinueCustomLoadAfterClear()
+{
+    if (m_using_cache_clear) {
+        DBG qDebug() <<  "Preview's httpcache was cleared";
+        m_using_cache_clear = false;
+    }
+
+    // Sigil may explode if there is no xmlns
+    // on the <html> element. So we will silently add it if needed to ensure
+    // no errors occur, to allow loading of html documents created outside of
+    // Sigil as well as catering for section splits etc.
+    QString replaced_html = m_xhtml_to_load;
+    replaced_html = replaced_html.replace("<html>", "<html xmlns=\"http://www.w3.org/1999/xhtml\">");
+
+    // Because of Chrome's silly 2MB url (GURL) size limit, we must create our own
+    // URL Scheme: (sigil) and then use our own scheme handler to directly load
+    // local files thereby avoiding the 2mb data url limit from using:
+    // setContent(replaced_html.toUtf8(),
+    //            "application/xhtml+xml;charset=UTF-8",
+    //            QUrl::fromLocalFile(path));
+
+    // Since the replaced html has possibly been modified by injections for
+    // dark mode, mathml, and etc., there is no original file that matches
+    // this exact xhtml, so store it in an application level cache so that
+    // our sigil URLSchemeHandler can find it. 
+    MainApplication *mainApplication = qobject_cast<MainApplication *>(qApp);
+    QUrl tgturl = QUrl::fromLocalFile(m_xhtml_path);
+    tgturl.setScheme("sigil");
+    tgturl.setHost("");
+    QString key = tgturl.toString();
+    mainApplication->saveInPreviewCache(key, replaced_html);
+    page()->load(tgturl);
+}
+
 
 void ViewPreview::ConnectSignalsToSlots()
 {
+    DBG qDebug() << "In ViewPreview ConnectSignalsToSlots";
     connect(page(), SIGNAL(loadFinished(bool)), this, SLOT(UpdateFinishedState(bool)));
     connect(page(), SIGNAL(loadFinished(bool)), this, SLOT(WebPageJavascriptOnLoad()));
     connect(page(), SIGNAL(loadStarted()), this, SLOT(LoadingStarted()));
-    connect(page(), SIGNAL(LinkClicked(const QUrl &)), this, SIGNAL(LinkClicked(const QUrl &)));
     connect(page(), SIGNAL(loadProgress(int)), this, SLOT(LoadingProgress(int)));
+    connect(page(), SIGNAL(LinkClicked(const QUrl &)), this, SIGNAL(LinkClicked(const QUrl &)));
     connect(page(), SIGNAL(linkHovered(const QString &)), this, SLOT(LinkHovered(const QString &)));
+#if QT_VERSION >= QT_VERSION_CHECK(6, 7, 0)
+    connect(page()->profile(), SIGNAL(clearHttpCacheCompleted()), this, SLOT(ContinueCustomLoadAfterClear()));
+#endif
 }
+

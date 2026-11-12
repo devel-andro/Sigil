@@ -1,6 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2015-2022 Doug Massay
 **  Copyright (C) 2012-2015 John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012      Dave Heiland
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
@@ -26,8 +27,8 @@
 #ifndef SIGIL_H
 #define SIGIL_H
 
-#include <QtCore/QSharedPointer>
-#include <QtWidgets/QMainWindow>
+#include <QSharedPointer>
+#include <QMainWindow>
 
 #include "ui_main.h"
 #include "BookManipulation/Book.h"
@@ -50,7 +51,7 @@
 #include "ViewEditors/ElementIndex.h"
 #include "Dialogs/SearchEditor.h"
 
-const int MAX_RECENT_FILES = 5;
+const int MAX_RECENT_FILES = 9;
 const int STATUSBAR_MSG_DISPLAY_TIME = 7000;
 
 class QComboBox;
@@ -71,7 +72,9 @@ class ClipsWindow;
 class SelectCharacter;
 class ViewImage;
 class FlowTab;
-
+class QWidget;
+class FileDropZone;
+class Resource;
 
 /**
  * @mainpage
@@ -117,9 +120,6 @@ public:
 
     void maybe_fixup_dockwidget_geometry(QDockWidget * widget);
 
-    // returns true if MainWindow is Maximized or is FullScreen
-    bool isMaxOrFull();
-
     /**
      * The book currently being edited.
      *
@@ -150,11 +150,17 @@ public:
      *
      * @return List of valid selected HTML resources
      */
+    QList <Resource *> GetBookBrowserSelectedResources();
     QList <Resource *> GetValidSelectedHTMLResources();
     QList <Resource *> GetValidSelectedCSSResources();
+    QList <Resource *> GetValidSelectedSVGResources();
+    QList <Resource *> GetValidSelectedJSResources();
+    QList <Resource *> GetValidSelectedMiscXMLResources();
 
     QList <Resource *> GetTabbedHTMLResources();
     QList <Resource *> GetTabbedCSSResources();
+
+    bool RenameClassInHtml(const QString& oldname, const QString& newname);
 
     /**
      * Returns a list of all HTML resources in book browser order
@@ -166,6 +172,9 @@ public:
 
     QList <Resource *> GetOPFResource();
     QList <Resource *> GetNCXResource();
+
+    /* returns the OPF metadata tag and all its children as xml */
+    QString GetOPFMetadataXML();
 
     /**
      * Select resources in the Book Browser
@@ -220,14 +229,22 @@ public:
 
     QString GetMathJaxFolder() { return m_mathjaxfolder; };
 
+    bool UsingAutomate() { return m_UsingAutomate; }
+
+    QString AutomatePluginParameter() { return m_AutomatePluginParameter; }
 
 public slots:
+
+    bool AddNavToSpine(); 
+    bool AddNavToSpineNonLinear();
 
     bool Automate(const QStringList &commands);
 
     void OpenUrl(const QUrl &url);
 
     void ScrollCVToFragment(const QString &fragment);
+
+    void AddDroppedFiles(const QStringList& filepaths);
 
     /**
      * Opens the specified resource in the specified view state.
@@ -248,9 +265,14 @@ public slots:
 
     bool UpdateManifestProperties();
 
+    bool UpdateManifestMediaTypes();
+
     bool GenerateNCXGuideFromNav();
 
     bool RemoveNCXGuideFromEpub3();
+
+    bool RemoveNavFromSpine();
+    bool AddNavToSpine(bool nonlinear);
 
     void CreateIndex();
 
@@ -264,20 +286,26 @@ public slots:
     void RepoCheckout(QString bookid="", QString destpath="", QString filename="", bool loadnow=true);
     void RepoDiff(QString bookid="");
     void RepoManage();
+    void RepoEditTagDescription();
+    void RepoShowLog();
 
-    void RunAutomate1();
-    void RunAutomate2();
-    void RunAutomate3();
+    void runAutomate(QAction *action);
     void RunAutomate(const QString &automatefile);
-
-    void EditAutomate1();
-    void EditAutomate2();
-    void EditAutomate3();
-    void EditAutomate(const QString &automatefile);
+    void UpdateAutomationMenu();
+    void ManageAutomateListsDialog();
     
     bool StandardizeEpub();
+    bool UseStandardFileExtensions();
+    bool RebaseManifestIDs();
 
     void CreateEpubLayout();
+
+    void FocusOnCodeView();
+    void FocusOnBookBrowser();
+    void FocusOnPreview();
+    void FocusOnTOC();
+    void FocusOnClips();
+    void HandleImageContentChanged(Resource* resource);
 
 signals:
     void SettingsChanged();
@@ -304,12 +332,7 @@ protected:
 
 private slots:
 
-    void UpdateLastSizes();
-
-    void RestoreLastNormalGeometry();
-
     bool AddCover();
-
 
     /**
      * Implements New action functionality.
@@ -391,6 +414,10 @@ private slots:
 
     void InsertId();
 
+    void InsertClip();
+
+    void InsertRole();
+
     void InsertHyperlink();
 
     void MarkForIndex();
@@ -407,6 +434,8 @@ private slots:
      *  Quick Launch Plugins via icon button
      */
     void QuickLaunchPlugin(int i);
+
+    void QuickLaunchAutomate(int i);
 
     /**
      * Some controls (CodeView and combo boxes in F&R) inherit PasteTarget
@@ -436,6 +465,11 @@ private slots:
 
     void ClipEditorDialog(ClipEditorModel::clipEntry *clip_entry = NULL);
 
+    /**
+     * Allow Keyboard Focus Navigation to main QDockWidgets
+     */
+    void FocusOn(QWidget* dw=nullptr);
+  
     /**
      * Implements User Guide action functionality.
      */
@@ -531,7 +565,7 @@ private slots:
     void SetStateActionsStaticView();
 
     void UpdatePreviewRequest();
-    void UpdatePreviewCSSRequest();
+    void UpdatePreviewTabRequest();
     void ScrollPreview();
     void UpdatePreview();
     void InspectHTML();
@@ -545,7 +579,7 @@ private slots:
      * @param line The line the currsor is currently at.
      * @param column The column within the line that the cursor is currently at.
      */
-    void UpdateCursorPositionLabel(int line, int column);
+     void UpdateCursorPositionLabel(int line, int column, int codepoint);
 
     /**
      * Zooms the current view with the new zoom slider value.
@@ -681,8 +715,8 @@ private slots:
     void unloadPluginsMenu();
 
 private:
-    void createJumpList();
     void updateToolTipsOnPluginIcons();
+    void updateToolTipsOnAutomateIcons();
     void UpdateClipButton(QAction *ui_action);
     void InsertFiles(const QStringList &selected_images);
     void InsertFilesFromDisk();
@@ -879,6 +913,8 @@ private:
     QStringList m_LastOpenFileWarnings;
     bool m_IsInitialLoad;
 
+    QByteArray m_LastState;
+    
     /**
      * The path to the current file loaded.
      */
@@ -957,6 +993,8 @@ private:
      */
     QLabel *m_lbCursorPosition;
 
+    FileDropZone * m_lbDropZone;
+
     /**
      * The slider which the user can use to zoom.
      */
@@ -1022,11 +1060,7 @@ private:
     /**
      * Workaround for Qt 4.8 bug, to track the last known window size when not maximized.
      */
-    QByteArray m_LastWindowSize;
-    QByteArray m_LastState;
     bool m_FirstTime;
-    bool m_PendingLastSizeUpdate;
-    bool m_SaveLastEnabled;
 
     QTimer m_PreviewTimer;
 
@@ -1037,20 +1071,30 @@ private:
     /**
      * dynamically updated plugin menus and actions
      */
-    QMenu *m_menuPlugins;
-    QMenu *m_menuPluginsInput;
-    QMenu *m_menuPluginsOutput;
-    QMenu *m_menuPluginsEdit;
-    QMenu *m_menuPluginsValidation;
-    QAction *m_actionManagePlugins;
+    QMenu *m_menuPlugins = nullptr;
+    QMenu *m_menuPluginsInput = nullptr;
+    QMenu *m_menuPluginsOutput = nullptr;
+    QMenu *m_menuPluginsEdit = nullptr;
+    QMenu *m_menuPluginsValidation = nullptr;
+    QAction *m_actionManagePlugins = nullptr;;
 
     QStringList m_pluginList;
-    bool m_SaveCSS;
+
+    /**
+     * dynamically updated Automation menus and actions
+     */
+    QMenu *m_menuAutomate = nullptr;;
+    QMenu *m_menuAutomateRun = nullptr;
+    QAction *m_actionManageAutomate = nullptr;;
+
+    bool m_SaveTab;
     bool m_IsClosing;
 
     QList<QAction*> m_qlactions;
 
     QList<QAction*> m_clactions;
+
+    QList<QAction*> m_auactions;
 
 
     /**
@@ -1060,10 +1104,14 @@ private:
 
     QString m_mathjaxfolder;
 
-    bool m_FRVisible;
+    // bool m_FRVisible;
 
     bool m_UsingAutomate;
     QStringList m_AutomateLog;
+    QString m_AutomatePluginParameter;
+    QStringList m_automateLists;
+
+    bool m_inShowLastOpenWarnings = false;
     
     /**
      * Holds all the widgets Qt Designer created for us.

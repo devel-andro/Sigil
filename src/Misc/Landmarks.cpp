@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2016-2020 Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2016-2026 Kevin B. Hendricks, Stratford, Ontario, Canada
 **
 **  This file is part of Sigil.
 **
@@ -29,16 +29,6 @@
 #include "Misc/UILanguage.h"
 #include "Misc/Landmarks.h"
 
-Landmarks *Landmarks::m_instance = 0;
-
-Landmarks *Landmarks::instance()
-{
-    if (m_instance == 0) {
-        m_instance = new Landmarks();
-    }
-
-    return m_instance;
-}
 
 Landmarks::Landmarks()
 {
@@ -63,7 +53,7 @@ QString Landmarks::GetTitle(const QString &code, const QString &lang)
     // Note the book language may differ from the ui language
     bool translation_loaded = false;
     QTranslator bookTranslator;
-    const QString qm_name = QString("sigil_%1").arg(lang);
+    QString qm_name = QString("sigil_%1").arg(lang);
     // Run though all locations and stop once we find and are able to load
     // an appropriate translation.
     foreach(QString path, UILanguage::GetPossibleTranslationPaths()) {
@@ -74,12 +64,24 @@ QString Landmarks::GetTitle(const QString &code, const QString &lang)
             }
         }
     }
+    // try again with just the base part of the langcode before any "-"
+    if (!translation_loaded && lang.contains("-")) {
+        const QString langcut = lang.split("-").at(0);
+        qm_name = QString("sigil_%1").arg(langcut);
+        foreach(QString path, UILanguage::GetPossibleTranslationPaths()) {
+            if (QDir(path).exists()) {
+                if (bookTranslator.load(qm_name, path)) {
+                    translation_loaded = true;
+                    break;
+                }
+            }
+        }
+    }
     // if no translator matched, use the user interface language so that
     // the dev can fix them manually
     if (!translation_loaded) {
         return GetName(code);
     }
-    
     QString title = bookTranslator.translate("Landmarks", m_CodeToRawTitle[code].toUtf8().constData());
     return title;
 }
@@ -165,6 +167,7 @@ void Landmarks::SetLandmarksMap()
         tr("Cover") << "cover" << tr("The publications cover(s), jacket information, etc.") <<
         tr("Dedication") << "dedication" << tr("An inscription addressed to one or several particular person(s).") <<
         tr("Division") << "division" << tr("A major structural division that may also appear as a substructure of a part (esp. in legislation).") <<
+        tr("Endnotes") << "endnotes" << tr("A collection of notes at the end of a work or a section within it.") <<
         tr("Epigraph") << "epigraph" << tr("A quotation that is pertinent but not integral to the text.") <<
         tr("Epilogue") << "epilogue" << tr("A concluding section that is typically written from a later point in time than the main story, although still part of the narrative.") <<
         tr("Errata") << "errata" << tr("Publication errata, in printed works typically a loose sheet inserted by hand; sometimes a bound page that contains corrections for mistakes in the work.") <<
@@ -190,7 +193,7 @@ void Landmarks::SetLandmarksMap()
         tr("Preface") << "preface" << tr("An introductory section that precedes the work, typically written by the work's author.") <<
         tr("Prologue") << "prologue" << tr("An introductory section that sets the background to a story, typically part of the narrative.") <<
         tr("Questions and Answers") << "qna" << tr("A question and answer section.") <<
-        tr("Rear Notes") << "rearnotes" << tr("A collection of notes appearing at the rear (backmatter) of the work, or at the end of a section.") <<
+        tr("Rear Notes") << "rearnotes" << tr("A collection of notes appearing at the rear (backmatter) of the work, or at the end of a section. Status: Deprecated") <<
         tr("Revision History") << "revision-history" << tr("A record of changes made to a work.") <<
         tr("Subchapter") << "subchapter" << tr("A major sub-division of a chapter.") <<
         tr("Title Page") << "titlepage" << tr("A page at the beginning of a book giving its title, authors, publisher and other publication information.") <<
@@ -257,6 +260,7 @@ void Landmarks::SetGuideLandMap()
     m_GuideLandMap["other.preamble"]      = "preamble";
     m_GuideLandMap["other.prologue"]      = "prologue";
     m_GuideLandMap["other.rearnotes"]     = "rearnotes";
+    m_GuideLandMap["other.endnotes"]      = "endnotes";
     // and their reverse
     m_GuideLandMap["afterword"]     = "other.afterword";
     m_GuideLandMap["appendix"]      = "other.appendix";
@@ -277,6 +281,7 @@ void Landmarks::SetGuideLandMap()
     m_GuideLandMap["preamble"]      = "other.preamble";
     m_GuideLandMap["prologue"]      = "other.prologue";
     m_GuideLandMap["rearnotes"]     = "other.rearnotes";
+    m_GuideLandMap["endnotes"]      = "other.endnotes";
 }
 
 
@@ -302,6 +307,7 @@ void Landmarks::SetCodeToRawTitleMap()
     m_CodeToRawTitle["cover"]            = "Cover";
     m_CodeToRawTitle["dedication"]       = "Dedication";
     m_CodeToRawTitle["division"]         = "Division";
+    m_CodeToRawTitle["endnotes"]         = "Endnotes";
     m_CodeToRawTitle["epigraph"]         = "Epigraph";
     m_CodeToRawTitle["epilogue"]         = "Epilogue";
     m_CodeToRawTitle["errata"]           = "Errata";

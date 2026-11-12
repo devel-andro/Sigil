@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2020 Kevin B. Hendricks
+**  Copyright (C) 2019-2026 Kevin B. Hendricks
 **  Copyright (C) 2013      Dave Heiland
 **
 **  This file is part of Sigil.
@@ -31,7 +31,6 @@
 #include <QtWidgets/QLayout>
 
 #include "ResourceObjects/ImageResource.h"
-#include "ViewEditors/SimplePage.h"
 #include "Misc/Utility.h"
 #include "MainUI/MainApplication.h"
 #include "Widgets/ImageView.h"
@@ -39,17 +38,20 @@
 
 static QString SETTINGS_GROUP = "view_image";
 
-ViewImage::ViewImage(QWidget *parent)
+ViewImage::ViewImage(QWidget *parent, bool delete_on_close)
     :
     QDialog(parent),
     m_iv(new ImageView(this)),
     m_bp(new QToolButton(this)),
     m_layout(new QVBoxLayout(this))
 {
+    if (delete_on_close) setAttribute(Qt::WA_DeleteOnClose, true);
+    setMinimumSize(200, 200);
     m_layout->addWidget(m_iv);
     m_bp->setToolTip(tr("Close this window"));
     m_bp->setText(tr("Done"));
     m_bp->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_bp->setFocusPolicy(Qt::TabFocus);
     QHBoxLayout* hl = new QHBoxLayout();
     hl->addStretch(0);
     hl->addWidget(m_bp);
@@ -71,7 +73,7 @@ QSize ViewImage::sizeHint()
 void ViewImage::ShowImage(QString path)
 {
     m_iv->ShowImage(path);
-    QApplication::processEvents();
+    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 }
 
 void ViewImage::ReloadViewer()
@@ -86,8 +88,6 @@ void ViewImage::ReadSettings()
     QByteArray geometry = settings.value("geometry").toByteArray();
     if (!geometry.isNull()) {
         restoreGeometry(geometry);
-    } else {
-        resize(sizeHint());
     }
     settings.endGroup();
 }
@@ -102,9 +102,7 @@ void ViewImage::WriteSettings()
 
 void ViewImage::ConnectSignalsToSlots()
 {
-#ifdef Q_OS_MAC
     MainApplication *mainApplication = qobject_cast<MainApplication *>(qApp);
     connect(mainApplication, SIGNAL(applicationPaletteChanged()), this, SLOT(ReloadViewer()));
-#endif
     connect(m_bp, SIGNAL(clicked()), this, SLOT(accept()));
 }

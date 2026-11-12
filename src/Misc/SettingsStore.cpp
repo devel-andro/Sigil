@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2016-2020  Kevin B. Hendricks, Stratford, ON
-**  Copyright (C) 2016-2020  Doug Massay
+**  Copyright (C) 2016-2026  Kevin B. Hendricks, Stratford, ON
+**  Copyright (C) 2016-2026  Doug Massay
 **  Copyright (C) 2011-2013  John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012-2013  Dave Heiland
 **
@@ -34,13 +34,18 @@
 
 #include "sigil_constants.h"
 
+static const QString SETTINGS_FILE = SIGIL_V6_SETTINGS_FILE;
+
 static QString SETTINGS_GROUP = "user_preferences";
 static QString KEY_DEFAULT_METADATA_LANGUAGE = SETTINGS_GROUP + "/" + "default_metadata_lang";
 static QString KEY_UI_LANGUAGE = SETTINGS_GROUP + "/" + "ui_language";
 static QString KEY_UI_FONT = SETTINGS_GROUP + "/" + "ui_font";
 static QString KEY_ORIGINAL_UI_FONT = SETTINGS_GROUP + "/" + "original_ui_font";
 static QString KEY_UI_ICON_THEME = SETTINGS_GROUP + "/" + "ui_icon_theme";
-static QString KEY_DRAG_DISTANCE_TWEAK = SETTINGS_GROUP + "/" + "drag_distance_tweak";
+static QString KEY_UI_PREVIEW_TIMEOUT = SETTINGS_GROUP + "/" + "ui_preview_timeout";
+static QString KEY_UI_HIGHLIGHT_FOCUS_WIDGET = SETTINGS_GROUP + "/" + "ui_highlight_focus_widget";
+static QString KEY_UI_DOUBLEWIDTH_TEXTCURSOR = SETTINGS_GROUP + "/" + "ui_doublewidth_textcursor";
+static QString KEY_UI_CUSTOM_SIGIL_DARK_THEME = SETTINGS_GROUP + "/" + "ui_custom_sigil_dark_theme";
 static QString KEY_ZOOM_IMAGE = SETTINGS_GROUP + "/" + "zoom_image";
 static QString KEY_ZOOM_TEXT = SETTINGS_GROUP + "/" + "zoom_text";
 static QString KEY_ZOOM_WEB = SETTINGS_GROUP + "/" + "zoom_web";
@@ -54,19 +59,23 @@ static QString KEY_SPELL_CHECK_NUMBERS = SETTINGS_GROUP + "/" + "spell_check_num
 static QString KEY_DEFAULT_USER_DICTIONARY = SETTINGS_GROUP + "/" + "user_dictionary_name";
 static QString KEY_ENABLED_USER_DICTIONARIES = SETTINGS_GROUP + "/" + "enabled_user_dictionaries";
 static QString KEY_PLUGIN_USER_MAP = SETTINGS_GROUP + "/" + "plugin_user_map";
+static QString KEY_AUTOMATE_USER_MAP = SETTINGS_GROUP + "/" + "automate_user_map";
+static QString KEY_AUTOMATE_SHOW_MENU = SETTINGS_GROUP + "/" + "automate_show_menu";
 static QString KEY_CLEAN_ON = SETTINGS_GROUP + "/" + "clean_on";
 static QString KEY_REMOTE_ON = SETTINGS_GROUP + "/" + "remote_on";
 static QString KEY_JAVASCRIPT_ON = SETTINGS_GROUP + "/" + "javascript_on";
 static QString KEY_SHOWFULLPATH_ON = SETTINGS_GROUP + "/" + "showfullpath_on";
-static QString KEY_HIGHDPI_SETTING = SETTINGS_GROUP + "/" + "high_dpi";
 static QString KEY_DISABLEGPU_SETTING = SETTINGS_GROUP + "/" + "disable_gpu";
+static QString KEY_PRINT_PREVIEW_DPI_SETTING = SETTINGS_GROUP + "/" + "print_preview_dpi";
+static QString KEY_PRINT_DPI_SETTING = SETTINGS_GROUP + "/" + "print_dpi";
 static QString KEY_PREVIEW_DARK_IN_DM = SETTINGS_GROUP + "/" + "preview_dark_in_dm";
 static QString KEY_DEFAULT_VERSION = SETTINGS_GROUP + "/" + "default_version";
 static QString KEY_PRESERVE_ENTITY_NAMES = SETTINGS_GROUP + "/" + "preserve_entity_names";
 static QString KEY_PRESERVE_ENTITY_CODES = SETTINGS_GROUP + "/" + "preserve_entity_codes";
 static QString KEY_EXTERNAL_XHTML_EDITOR = SETTINGS_GROUP + "/" + "external_xhtml_editor"; 
-static QString KEY_ENABLE_ALTGR = SETTINGS_GROUP + "/" + "enable_altgr";
+static QString KEY_ENABLE_FILE_DROP_ZONE = SETTINGS_GROUP + "/" + "enable_file_drop_zone";
 
+static QString KEY_ENABLE_ALTGR = SETTINGS_GROUP + "/" + "enable_altgr";
 static QString KEY_PLUGIN_INFO = SETTINGS_GROUP + "/" + "plugin_info";
 static QString KEY_PLUGIN_ENGINE_PATHS = SETTINGS_GROUP + "/" + "plugin_engine_paths";
 static QString KEY_PLUGIN_LAST_FOLDER = SETTINGS_GROUP + "/" + "plugin_add_last_folder";
@@ -104,6 +113,7 @@ static QString KEY_CODE_VIEW_XHTML_HTML_COLOR = SETTINGS_GROUP + "/" + "code_vie
 static QString KEY_CODE_VIEW_XHTML_HTML_COMMENT_COLOR = SETTINGS_GROUP + "/" + "code_view_xhtml_html_comment_color";
 
 static QString KEY_CODE_VIEW_HIGHLIGHT_OPEN_CLOSE_TAGS = SETTINGS_GROUP + "/" + "code_view_highlight_open_close_tags";
+static QString KEY_SKIP_PRINT_PREVIEW = SETTINGS_GROUP + "/" + "skipprintpreview";
 
 // Dark Appearance
 static QString KEY_CV_DARK_CSS_COMMENT_COLOR = SETTINGS_GROUP + "/" + "cv_dark_css_comment_color";
@@ -133,7 +143,7 @@ static QString KEY_MAIN_MENU_ICON_SIZE = SETTINGS_GROUP + "/" + "main_menu_icon_
 static QString KEY_CLIPBOARD_HISTORY_LIMIT = SETTINGS_GROUP + "/" + "clipboard_history_limit";
 
 SettingsStore::SettingsStore()
-    : QSettings(Utility::DefinePrefsDir() + "/sigil.ini", QSettings::IniFormat)
+    : QSettings(Utility::DefinePrefsDir() + "/" + SETTINGS_FILE, QSettings::IniFormat)
 {  
     // See QTBUG-40796 and QTBUG-54510 as using UTF-8 as a codec for ini files is very broken
     // setIniCodec("UTF-8");
@@ -170,12 +180,33 @@ QString SettingsStore::uiIconTheme()
     return value(KEY_UI_ICON_THEME, "main").toString();
 }
 
-int SettingsStore::uiDragDistanceTweak()
+
+int SettingsStore::uiPreviewTimeout()
 {
     clearSettingsGroup();
-    return value(KEY_DRAG_DISTANCE_TWEAK, 0).toInt();
+    return value(KEY_UI_PREVIEW_TIMEOUT, 1000).toInt();
 }
 
+bool SettingsStore::uiHighlightFocusWidgetEnabled()
+{
+    clearSettingsGroup();
+    return value(KEY_UI_HIGHLIGHT_FOCUS_WIDGET, false).toBool();
+   
+}
+
+bool SettingsStore::uiDoubleWidthTextCursor()
+{
+    clearSettingsGroup();
+    return value(KEY_UI_DOUBLEWIDTH_TEXTCURSOR, false).toBool();
+}
+
+bool SettingsStore::uiUseCustomSigilDarkTheme()
+{
+    clearSettingsGroup();
+    return value(KEY_UI_CUSTOM_SIGIL_DARK_THEME, true).toBool();
+}
+
+    
 QString SettingsStore::defaultMetadataLang()
 {
     clearSettingsGroup();
@@ -186,6 +217,12 @@ QString SettingsStore::externalXEditorPath()
 {
     clearSettingsGroup();
     return value(KEY_EXTERNAL_XHTML_EDITOR, "").toString();
+}
+
+bool SettingsStore::fileDropZoneEnabled()
+{
+   clearSettingsGroup();
+   return value(KEY_ENABLE_FILE_DROP_ZONE, true).toBool();
 }
 
 float SettingsStore::zoomImage()
@@ -275,19 +312,25 @@ int SettingsStore::javascriptOn()
 int SettingsStore::showFullPathOn()
 {
     clearSettingsGroup();
-    return value(KEY_SHOWFULLPATH_ON, 0).toInt();
-}
-
-int SettingsStore::highDPI()
-{
-    clearSettingsGroup();
-    return value(KEY_HIGHDPI_SETTING, 0).toInt();
+    return value(KEY_SHOWFULLPATH_ON, 1).toInt();
 }
 
 bool SettingsStore::disableGPU()
 {
     clearSettingsGroup();
     return static_cast<bool>(value(KEY_DISABLEGPU_SETTING, false).toBool());
+}
+
+int SettingsStore::printPreviewDPI()
+{
+    clearSettingsGroup();
+    return value(KEY_PRINT_PREVIEW_DPI_SETTING, 96).toInt();
+}
+
+int SettingsStore::printDPI()
+{
+    clearSettingsGroup();
+    return value(KEY_PRINT_DPI_SETTING, 300).toInt();
 }
 
 int SettingsStore::previewDark()
@@ -312,10 +355,26 @@ QStringList SettingsStore::pluginMap()
     return value(KEY_PLUGIN_USER_MAP, EmptyMap).toStringList();
 }
 
+QStringList SettingsStore::automateMap()
+{
+    clearSettingsGroup();
+    QStringList EmptyMap = QStringList();
+    for (int i = 0; i < 3; i++) {
+        EmptyMap.append("");
+    }
+    return value(KEY_AUTOMATE_USER_MAP, EmptyMap).toStringList();
+}
+
+bool SettingsStore::automateShowMenu()
+{
+    clearSettingsGroup();
+    return value(KEY_AUTOMATE_SHOW_MENU, false).toBool();
+}
+
 QString SettingsStore::defaultVersion()
 {
     clearSettingsGroup();
-    return value(KEY_DEFAULT_VERSION, "2.0").toString();
+    return value(KEY_DEFAULT_VERSION, "3.0").toString();
 }
 
 QList <std::pair <ushort, QString>>  SettingsStore::preserveEntityCodeNames()
@@ -492,6 +551,12 @@ bool SettingsStore::enableAltGr()
     return static_cast<bool>(value(KEY_ENABLE_ALTGR, false).toBool());
 }
 
+bool SettingsStore::skipPrintPreview()
+{
+  clearSettingsGroup();
+  return value(KEY_SKIP_PRINT_PREVIEW, false).toBool();
+}
+
 void SettingsStore::setDefaultMetadataLang(const QString &lang)
 {
     clearSettingsGroup();
@@ -522,16 +587,40 @@ void SettingsStore::setUIIconTheme(const QString &iconthemename)
     setValue(KEY_UI_ICON_THEME, iconthemename);
 }
 
-void SettingsStore::setUiDragDistanceTweak(int tweak)
+void SettingsStore::setUIPreviewTimeout(int timeout)
 {
     clearSettingsGroup();
-    setValue(KEY_DRAG_DISTANCE_TWEAK, tweak);
+    setValue(KEY_UI_PREVIEW_TIMEOUT, timeout);
+}
+
+void SettingsStore::setUIHighlightFocusWidget(bool enable)
+{
+    clearSettingsGroup();
+    setValue(KEY_UI_HIGHLIGHT_FOCUS_WIDGET, enable);
+}
+
+void SettingsStore::setUiDoubleWidthTextCursor(bool enable)
+{
+    clearSettingsGroup();
+    setValue(KEY_UI_DOUBLEWIDTH_TEXTCURSOR, enable);
+}
+
+void SettingsStore::setUiUseCustomSigilDarkTheme(bool enable)
+{
+    clearSettingsGroup();
+    setValue(KEY_UI_CUSTOM_SIGIL_DARK_THEME, enable);
 }
 
 void SettingsStore::setExternalXEditorPath(const QString &path)
 {
     clearSettingsGroup();
     setValue(KEY_EXTERNAL_XHTML_EDITOR, path);
+}
+
+void SettingsStore::setFileDropZoneEnabled(bool enable)
+{
+    clearSettingsGroup();
+    setValue(KEY_ENABLE_FILE_DROP_ZONE, enable);
 }
 
 void SettingsStore::setZoomImage(float zoom)
@@ -624,16 +713,22 @@ void SettingsStore::setShowFullPathOn(int on)
     setValue(KEY_SHOWFULLPATH_ON, on);
 }
 
-void SettingsStore::setHighDPI(int value)
-{
-    clearSettingsGroup();
-    setValue(KEY_HIGHDPI_SETTING, value);
-}
-
 void SettingsStore::setDisableGPU(bool value)
 {
     clearSettingsGroup();
     setValue(KEY_DISABLEGPU_SETTING, value);
+}
+
+void SettingsStore::setPrintPreviewDPI(int dpi)
+{
+    clearSettingsGroup();
+    setValue(KEY_PRINT_PREVIEW_DPI_SETTING, dpi);
+}
+
+void SettingsStore::setPrintDPI(int dpi)
+{
+    clearSettingsGroup();
+    setValue(KEY_PRINT_DPI_SETTING, dpi);
 }
 
 void SettingsStore::setPreviewDark(int enabled)
@@ -653,6 +748,18 @@ void SettingsStore::setPluginMap(const QStringList &map)
 {
     clearSettingsGroup();
     setValue(KEY_PLUGIN_USER_MAP, map);
+}
+
+void SettingsStore::setAutomateMap(const QStringList &map)
+{
+    clearSettingsGroup();
+    setValue(KEY_AUTOMATE_USER_MAP, map);
+}
+
+void SettingsStore::setAutomateShowMenu(bool enable)
+{
+    clearSettingsGroup();
+    setValue(KEY_AUTOMATE_SHOW_MENU, enable);
 }
 
 void SettingsStore::setDefaultVersion(const QString &version)
@@ -813,6 +920,12 @@ void SettingsStore::setEnableAltGr(bool enabled)
     setValue(KEY_ENABLE_ALTGR, enabled);
 }
 
+void SettingsStore::setSkipPrintPreview(bool skip)
+{
+  clearSettingsGroup();
+  return setValue(KEY_SKIP_PRINT_PREVIEW, skip);
+}
+
 void SettingsStore::clearAppearanceSettings()
 {
     clearSettingsGroup();
@@ -868,11 +981,12 @@ void SettingsStore::clearAppearanceSettings()
     remove(KEY_SPECIAL_CHARACTER_FONT_SIZE);
     remove(KEY_MAIN_MENU_ICON_SIZE);
     remove(KEY_SHOWFULLPATH_ON);
-    remove(KEY_HIGHDPI_SETTING);
     remove(KEY_UI_FONT);
     remove(KEY_UI_ICON_THEME);
-    remove(KEY_DRAG_DISTANCE_TWEAK);
     remove(KEY_PREVIEW_DARK_IN_DM);
+    remove(KEY_UI_HIGHLIGHT_FOCUS_WIDGET);
+    remove(KEY_UI_DOUBLEWIDTH_TEXTCURSOR);
+    remove(KEY_UI_CUSTOM_SIGIL_DARK_THEME);
     ;
 }
 

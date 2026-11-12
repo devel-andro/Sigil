@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2021 Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2019-2025 Kevin B. Hendricks, Stratford, Ontario, Canada
 **  Copyright (C) 2019      Doug Massay
 **  Copyright (C) 2012      Daniel Pavel <daniel.pavel@gmail.com>
 **
@@ -22,6 +22,7 @@
 *************************************************************************/
 
 #include <QtCore/QProcess>
+#include <QProcessEnvironment>
 #if defined(Q_OS_WIN32)
 #include "Windows.h"
 #endif
@@ -34,6 +35,7 @@
 #include "Misc/OpenExternally.h"
 #include "Misc/SettingsStore.h"
 #include "Misc/Utility.h"
+#include "sigil_constants.h"
 
 #define DBG if(0)
 
@@ -103,7 +105,7 @@ bool OpenExternally::openFile(const QString &filePath, const QString &applicatio
 #if defined(Q_OS_MAC)
 
     if (QFile::exists(filePath) && QDir(application).exists()) {
-        QStringList arguments = QStringList() << "-a" << application << filePath;
+        QStringList arguments = QStringList() << "-a" << application << filePath << "--args" << filePath;
         return QProcess::startDetached("/usr/bin/open", arguments);
     }
 
@@ -151,11 +153,16 @@ bool OpenExternally::openFile(const QString &filePath, const QString &applicatio
         return proc.startDetached();
     }
 
-#else
-
+#else  // Linux
+    QProcess proc;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     if (QFile::exists(filePath) && QFile::exists(application)) {
         QStringList arguments = QStringList(QDir::toNativeSeparators(filePath));
-        return QProcess::startDetached(QDir::toNativeSeparators(application), arguments, QFileInfo(filePath).absolutePath());
+        proc.setProgram(QDir::toNativeSeparators(application));
+        proc.setProcessEnvironment(env);
+        proc.setArguments(arguments);
+        proc.setWorkingDirectory(QFileInfo(filePath).absolutePath());
+        return proc.startDetached();        
     }
 
 #endif
@@ -163,14 +170,15 @@ bool OpenExternally::openFile(const QString &filePath, const QString &applicatio
 }
 
 
-bool OpenExternally::openFileWithXEditor(const QString& filePath, const QString &application, int spinenum)
+bool OpenExternally::openFileWithXEditor(const QString& filePath, const QString &application, int spinenum, int filepos)
 {
     QString spineno = QString::number(spinenum);
+    QString curpos = QString::number(filepos);
 
 #if defined(Q_OS_MAC)
 
     if (QFile::exists(filePath) && QDir(application).exists()) {
-        QStringList arguments = QStringList() << "-a" << application << "--args" << filePath << spineno;
+        QStringList arguments = QStringList() << "-n"<< "-a"<< application << "--args" << filePath << spineno << curpos;
         return QProcess::startDetached("/usr/bin/open", arguments);
     }
 
@@ -188,14 +196,14 @@ bool OpenExternally::openFileWithXEditor(const QString& filePath, const QString 
             // Filename only. No other way to get the cmd string properly quoted/escaped otherwise. We'll change
             // the working directory to the directory where the scripts resides so that it can be found/launched.
             QString nativeArguments;
-            nativeArguments = QString(QFileInfo(application).fileName() + " \"" + QDir::toNativeSeparators(filePath) + "\"" + " %1").arg(spineno);
+            nativeArguments = QString(QFileInfo(application).fileName() + " \"" + QDir::toNativeSeparators(filePath) + "\"" + " %1 %2").arg(spineno).arg(curpos);
             proc.setNativeArguments(nativeArguments);
         } else {
             DBG qDebug() << "External binary program being launched: " << application;
             batch = false;
             proc.setProgram(application);
             QStringList arguments;
-            arguments << QDir::toNativeSeparators(filePath) << spineno;
+            arguments << QDir::toNativeSeparators(filePath) << spineno << curpos;
             proc.setArguments(arguments);
         }
         // Change to the directory of the application/script first. This is
@@ -221,12 +229,18 @@ bool OpenExternally::openFileWithXEditor(const QString& filePath, const QString 
         return proc.startDetached();
     }
 
-#else
-
+#else  // Linux
+    QProcess proc;
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     if (QFile::exists(filePath) && QFile::exists(application)) {
         QStringList arguments = QStringList(QDir::toNativeSeparators(filePath));
-        arguments << spineno;
-        return QProcess::startDetached(QDir::toNativeSeparators(application), arguments, QFileInfo(filePath).absolutePath());
+        arguments << spineno << curpos;
+        proc.setProgram(QDir::toNativeSeparators(application));
+        proc.setProcessEnvironment(env);
+        proc.setArguments(arguments);
+        proc.setWorkingDirectory(QFileInfo(filePath).absolutePath());
+        //return QProcess::startDetached(QDir::toNativeSeparators(application), arguments, QFileInfo(filePath).absolutePath());
+        return proc.startDetached();
     }
 
 #endif
@@ -281,6 +295,23 @@ const QString OpenExternally::prettyApplicationName(const QString &applicationpa
     return QFileInfo(applicationpath).completeBaseName();
 }
 
+void  OpenExternally::clearEditorListForResourceType(const Resource::ResourceType type)
+{
+    if (!mayOpen(type)) {
+        return;
+    }
+
+    const QString editorsKey = QString("editors_") + RESOURCE_TYPE_NAME(type);
+    SettingsStore settings;
+    settings.beginGroup(SETTINGS_GROUP);
+    QStringList EmptyList = QStringList();
+    QStringList editors = settings.value(editorsKey, EmptyList).toStringList();
+    editors.clear();
+    settings.setValue(editorsKey, editors);
+    return;
+}
+
+
 const QString OpenExternally::selectEditorForResourceType(const Resource::ResourceType type, QWidget *parent)
 {
     if (!mayOpen(type)) {
@@ -321,13 +352,12 @@ const QString OpenExternally::selectEditorForResourceType(const Resource::Resour
                                        + " (*)"
 #endif
                                        ;
-#ifdef Q_OS_MAC
-    QFileDialog::Options options = QFileDialog::Options() | QFileDialog::ReadOnly;
-#else
-    QFileDialog::Options options = QFileDialog::Options() | QFileDialog::ReadOnly | QFileDialog::HideNameFilterDetails;
+    QFileDialog::Options options = Utility::DlgOptions("MacUseNative") | QFileDialog::ReadOnly;
+#ifndef Q_OS_MAC
+    options = options | QFileDialog::HideNameFilterDetails;
 #endif
 
-    // Qt Bug, must use native FileDialog here otherwise treats .app as normal directory
+    // Qt Bug, must use native QFileDialog here otherwise treats .app as normal directory
 
     const QString selectedFile = QFileDialog::getOpenFileName(parent,
                                  QObject::tr("Open With"),

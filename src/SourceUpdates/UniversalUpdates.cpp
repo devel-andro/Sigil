@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021  Kevin B. Hendricks  Stratford, Ontario Canada
+**  Copyright (C) 2015-2024  Kevin B. Hendricks  Stratford, Ontario Canada
 **  Copyright (C) 2009-2011  Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -94,9 +94,10 @@ QStringList UniversalUpdates::PerformUniversalUpdates(bool resources_already_loa
         html_future = QtConcurrent::mapped(html_resources, std::bind(LoadAndUpdateOneHTMLFile, std::placeholders::_1, html_updates, css_updates, non_well_formed));
         css_future = QtConcurrent::map(css_resources,  std::bind(LoadAndUpdateOneCSSFile,  std::placeholders::_1, css_updates));
     }
-
-    sync.addFuture(html_future);
+    sync.addFuture(QFuture<void>(html_future));
     sync.addFuture(css_future);
+
+    sync.waitForFinished();
 
     // We can't schedule these with QtConcurrent because they
     // will (indirectly) call QTextDocument::setPlainText, and if
@@ -119,8 +120,6 @@ QStringList UniversalUpdates::PerformUniversalUpdates(bool resources_already_loa
         xml_resource->SetCurrentBookRelPath("");
         xml_resource->SaveToDisk();
     }
-
-    sync.waitForFinished();
 
     // Now assemble our list of errors if any.
     QStringList load_update_errors;

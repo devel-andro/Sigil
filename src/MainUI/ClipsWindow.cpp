@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -20,11 +20,14 @@
 **
 *************************************************************************/
 
-#include <QtWidgets/QTreeView>
-#include <QtWidgets/QVBoxLayout>
-#include <QtGui/QContextMenuEvent>
-#include <QtWidgets/QAction>
-#include <QtWidgets/QMenu>
+#include <QTreeView>
+#include <QVBoxLayout>
+#include <QContextMenuEvent>
+#include <QAction>
+#include <QMenu>
+#include <QPaintEvent>
+#include <QStylePainter>
+#include <QApplication>
 #include <QPointer>
 
 #include "Misc/Utility.h"
@@ -59,10 +62,43 @@ void ClipsWindow::showEvent(QShowEvent *event)
     raise();
 }
 
+void ClipsWindow::paintEvent(QPaintEvent *event)
+{
+    // Allow title text to be set independently of tab text
+    // (when QDockWidget is tabified).
+    QStylePainter painter(this);
+
+    if (isFloating()) {
+        QStyleOptionFrame options;
+        options.initFrom(this);
+
+#ifdef Q_OS_MAC
+        // This is needed for Qt6 but works on Qt5 as well
+        options.palette = QApplication::palette();
+#endif
+
+        painter.drawPrimitive(QStyle::PE_FrameDockWidget, options);
+    }
+    QStyleOptionDockWidget options;
+    initStyleOption(&options);
+    options.title = windowTitle();
+
+#ifdef Q_OS_MAC
+    // This is needed for Qt6 but works on Qt5 as well
+    options.palette = QApplication::palette();
+#endif
+
+    painter.drawControl(QStyle::CE_DockWidgetTitle, options);
+}
+
+void ClipsWindow::SetFocusOnClips()
+{
+   if (m_TreeView) m_TreeView->setFocus();
+}
+
 void ClipsWindow::SetupTreeView()
 {
-    m_ClipsModel = ClipEditorModel::instance();
-    m_TreeView->setModel(m_ClipsModel);
+    m_TreeView->setModel(&ClipEditorModel::instance());
     m_TreeView->setSortingEnabled(false);
     m_TreeView->setWordWrap(false);
     m_TreeView->setAlternatingRowColors(false);
@@ -77,8 +113,8 @@ void ClipsWindow::SetupTreeView()
     m_TreeView->setAnimated(true);
     m_TreeView->setIndentation(COLUMN_INDENTATION);
     m_TreeView->setHeaderHidden(true);
-
     m_TreeView->setColumnHidden(1, true);
+    m_TreeView->setColumnHidden(2, true);
 
     m_TreeView->expandAll();
 }
@@ -86,7 +122,7 @@ void ClipsWindow::SetupTreeView()
 
 void ClipsWindow::ItemClickedHandler(const QModelIndex &index)
 {
-    ClipEditorModel::clipEntry *clip = ClipEditorModel::instance()->GetEntry(index);
+    ClipEditorModel::clipEntry *clip = ClipEditorModel::instance().GetEntry(index);
 
     QList<ClipEditorModel::clipEntry *> clips;
     clips.append(clip);

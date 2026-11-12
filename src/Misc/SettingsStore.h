@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2020 Kevin B. Hendricks, Stratford Ontario Canada
-**  Copyright (C) 2020      Doug Massay
+**  Copyright (C) 2015-2025 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2020-2025 Doug Massay
 **  Copyright (C) 2011-2013 John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012-2013 Dave Heiland
 **
@@ -61,8 +61,10 @@ public:
     QString uiFont();
     QString originalUIFont();
     QString uiIconTheme();
-
-    int uiDragDistanceTweak();
+    int uiPreviewTimeout();
+    bool uiHighlightFocusWidgetEnabled();
+    bool uiDoubleWidthTextCursor();
+    bool uiUseCustomSigilDarkTheme();
 
     /**
      * The default langauge to use when creating new books.
@@ -72,6 +74,8 @@ public:
     QString defaultMetadataLang();
 
     QString externalXEditorPath();
+
+    bool fileDropZoneEnabled();
 
     /**
      * The zoom factor used by the component.
@@ -149,15 +153,27 @@ public:
 
     int showFullPathOn();
 
-    int highDPI();
-
     bool disableGPU();
+
+    /**
+     * DPI settings for Webviewprinter Preview
+     */
+    int printPreviewDPI();
+
+    /**
+     * DPI settings for Webviewprinter Print
+     */
+    int printDPI();
 
     int previewDark();
 
     int cleanOn();
 
     QStringList pluginMap();
+
+    QStringList automateMap();
+
+    bool automateShowMenu();
 
     QString defaultVersion();
 
@@ -257,6 +273,8 @@ public:
 
     bool enableAltGr();
 
+    bool skipPrintPreview();
+
 public slots:
 
     /**
@@ -272,8 +290,14 @@ public slots:
 
     void setUIIconTheme(const QString &iconthemename);
 
-    void setUiDragDistanceTweak(int tweak);
+    void setUIPreviewTimeout(int timeout);
 
+    void setUIHighlightFocusWidget(bool enable);
+
+    void setUiDoubleWidthTextCursor(bool enable);
+
+    void setUiUseCustomSigilDarkTheme(bool enable);
+    
     /**
      * Set the default language to use when creating new books.
      *
@@ -282,6 +306,8 @@ public slots:
     void setDefaultMetadataLang(const QString &lang);
 
     void setExternalXEditorPath(const QString &path);
+
+    void setFileDropZoneEnabled(bool enable);
 
     /**
      * Set the zoom factor used by the component.
@@ -360,15 +386,27 @@ public slots:
 
     void setShowFullPathOn(int on);
 
-    void setHighDPI(int value);
-
     void setDisableGPU(bool value);
+
+    /**
+     * Set the Print Preview DPI for Webviewprinter
+     */
+    void setPrintPreviewDPI(int dpi);
+
+    /**
+     * Set the Print  DPI for Webviewprinter
+     */
+    void setPrintDPI(int dpi);
 
     void setPreviewDark(int enabled);
 
     void setCleanOn(int on);
 
     void setPluginMap(const QStringList & map);
+
+    void setAutomateMap(const QStringList & map);
+
+    void setAutomateShowMenu(bool enabled);
 
     void setDefaultVersion(const QString &version);
 
@@ -408,6 +446,8 @@ public slots:
     void setClipboardHistoryLimit(int limit);
 
     void setEnableAltGr(bool enabled);
+    
+    void setSkipPrintPreview(bool skip);
 
 private:
     /**

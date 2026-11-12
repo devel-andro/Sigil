@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2020 Kevin B. Hendricks, Stratford ON
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford ON
 **  Copyright (C) 2013      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
@@ -26,9 +26,12 @@
 #define OPFRESOURCE_H
 
 #include <memory>
+#include <QStringList>
+#include <QHash>
+#include <QString>
 #include "Misc/GuideItems.h"
 #include "ResourceObjects/XMLResource.h"
-#include "ResourceObjects/OPFParser.h"
+#include "Parsers/OPFParser.h"
 
 class HTMLResource;
 class ImageResource;
@@ -52,9 +55,9 @@ public:
 
     // inherited
 
-    virtual bool RenameTo(const QString &new_filename);
+    virtual bool RenameTo(const QString &new_filename, bool in_bulk=false);
 
-    virtual bool MoveTo(const QString &newbookpath);
+    virtual bool MoveTo(const QString &newbookpath, bool in_bulk=false);
 
     virtual ResourceType Type() const;
 
@@ -64,13 +67,15 @@ public:
 
     virtual bool LoadFromDisk();
 
-    QString GetGuideSemanticCodeForResource(const Resource *resource) const;
-    QString GetGuideSemanticNameForResource(Resource *resource);
-    QHash <QString, QString> GetSemanticCodeForPaths();
-    QHash <QString, QString> GetGuideSemanticNameForPaths();
+    QString GetGuideSemanticCodeForResource(const Resource *resource, QString tgt_id="") const;
+    QString GetGuideSemanticNameForResource(Resource *resource, QString tgt_id="");
+    QHash <QString, QStringList> GetSemanticCodeForPaths();
+    QHash <QString, QStringList> GetGuideSemanticNameForPaths();
+    QStringList GetAllGuideInfoByBookPath() const;
 
     void ClearSemanticCodesInGuide();
 
+    void MoveReadingOrder(const HTMLResource* from_htmlresource, const HTMLResource* to_after_htmlresource);
     int GetReadingOrder(const HTMLResource *html_resource) const;
     QHash <Resource *, int> GetReadingOrderAll( const QList <Resource *> resources);
 
@@ -95,12 +100,18 @@ public:
 
     void UpdateNCXLocationInManifest(const NCXResource *ncx);
 
+    void RemoveResourceFromSpine(const Resource* resource);
+
+    void AppendResourceToSpine(const Resource * resource, bool nonlinear);
+
     QString AddModificationDateMeta();
 
     void AddSigilVersionMeta();
 
     bool IsCoverImage(const ImageResource *image_resource) const;
 
+    QString GetCoverImagePath() const;
+    
     void AutoFixWellFormedErrors();
 
     QStringList GetSpineOrderBookPaths() const;
@@ -122,6 +133,9 @@ public:
     // returns first (primary) dc:title value found
     QString GetPrimaryBookTitle() const;
 
+    // returns the metadata tag and all its contents as an xml fragment
+    QString GetMetadataXML() const;
+
     /**
      * Returns the book's Dublin Core metadata.
      *
@@ -129,6 +143,11 @@ public:
      */
     QList<MetaEntry> GetDCMetadata() const;
 
+    /**
+     * Returns list of any Media Overlay Active Class Selctors if defined in OPF metadata
+     */
+    QStringList GetMediaOverlayActiveClassSelectors() const;
+    
     /**
      * Returns the values for a specific dc: metadata name.
      *
@@ -141,6 +160,12 @@ public:
 
     void UpdateGuideAfterMerge(QList<Resource*> &merged_resources, QHash<QString,QString> &section_id_map);
     void UpdateGuideFragments(QHash<QString,QString> &idupdates);
+
+    bool isNavInSpine() const;
+
+    // these were added for managing backwards compatibility with older epub2 only e-readers
+    void RemoveExistingEpub2CoverMeta();
+    void AddEpub2CoverMeta(Resource* image_resource);
 
  signals:
     void TextChanging();
@@ -157,25 +182,32 @@ public slots:
     void SetDCMetadata(const QList<MetaEntry>  &metadata);
 
     void AddResource(const Resource *resource);
+    void BulkAddResources(const QList<Resource*>resources);
 
     void RemoveResource(const Resource *resource);
     void BulkRemoveResources(const QList<Resource *>resources);
 
-    void AddGuideSemanticCode(HTMLResource *html_resource, QString code, bool toggle = true);
+    void AddGuideSemanticCode(HTMLResource *html_resource, QString code, bool toggle = true, QString tgt_id="");
 
     void SetResourceAsCoverImage(ImageResource *image_resource);
 
     void UpdateSpineOrder(const QList<HTMLResource *> html_files);
 
     void ResourceRenamed(const Resource *resource, QString old_full_path);
+    void BulkResourcesRenamed(const QHash<QString, Resource *> renamedDict);
 
     void ResourceMoved(const Resource *resource, QString old_full_path);
+    void BulkResourcesMoved(const QHash<QString, Resource *> movedDict);
 
     void UpdateManifestProperties(const QList<Resource *> resources);
+
+    void UpdateManifestMediaTypes(const QList<Resource*> resources);
 
     QString GetManifestPropertiesForResource(const Resource * resource);
 
     QHash <QString, QString> GetManifestPropertiesForPaths();
+
+    void RebaseManifestIDs();
 
 private:
 
@@ -206,13 +238,16 @@ private:
     int GetMainIdentifier(const OPFParser &p) const;
 
     // CAN BE -1 which means no reference for resource
-    int GetGuideReferenceForResourcePos(const Resource *resource, const OPFParser &p) const;
+    int GetGuideReferenceForResourcePos(const Resource *resource, const OPFParser &p, QString tgt_id="") const;
 
-    void RemoveGuideReferenceForResource(const Resource *resource, OPFParser &p);
+    void RemoveGuideReferenceForResource(const Resource *resource, OPFParser &p, QString tgt_id="");
+    
+    void RemoveAllGuideReferencesForResource(const Resource *resource, OPFParser& p);
 
-    QString GetGuideSemanticCodeForResource(const Resource *resource, const OPFParser &p) const;
+    QString GetGuideSemanticCodeForResource(const Resource *resource, const OPFParser &p, QString tgt_id="") const;
 
-    void SetGuideSemanticCodeForResource(QString code, const Resource *resource, OPFParser &p, const QString &lang);
+    void SetGuideSemanticCodeForResource(QString code, const Resource *resource, OPFParser &p,
+                                         const QString &lang, QString tgt_id="");
 
     void RemoveDuplicateGuideCodes(QString code, OPFParser &p);
 
@@ -253,8 +288,6 @@ private:
     QString GetUniqueID(const QString &preferred_id, const OPFParser &p) const;
 
     QString GetResourceMimetype(const Resource *resource) const;
-
-    QString GetFileMimetype(const QString &filepath) const;
 
     void UpdateText(const OPFParser &p);
 

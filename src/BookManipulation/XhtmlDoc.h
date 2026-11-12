@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2019 Kevin B. Hendricks Stratford, ON, Canada 
-**  Copyright (C) 2009, 2010, 2011  Strahinja Markovic  <strahinja.markovic@gmail.com>
+**  Copyright (C) 2015-2025 Kevin B. Hendricks Stratford, ON, Canada 
+**  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
 **
@@ -30,11 +30,11 @@
 #include "ViewEditors/ViewEditor.h"
 
 class QString;
-class QStringList;
+#include <QStringList>
 class QXmlStreamReader;
 class TagLister;
 
-const QList<GumboTag> GIMAGE_TAGS = QList<GumboTag>() << GUMBO_TAG_IMG << GUMBO_TAG_IMAGE;
+const QList<GumboTag> GIMAGE_TAGS = QList<GumboTag>() << GUMBO_TAG_IMG << GUMBO_TAG_IMAGE << GUMBO_TAG_MATH;
 const QList<GumboTag> GVIDEO_TAGS = QList<GumboTag>() << GUMBO_TAG_VIDEO;
 const QList<GumboTag> GAUDIO_TAGS = QList<GumboTag>() << GUMBO_TAG_AUDIO;
 
@@ -78,6 +78,7 @@ public:
     static QList<QString> GetAllDescendantHrefs(const QString & source);
     static QList<QString> GetAllDescendantIDs(const QString & );
     static QList<QString> GetAllDescendantClasses(const QString & source);
+    static int GetFirstUseOfClass(const QString& source, const QString& class_name_to_find);
 
     struct WellFormedError {
         int line;

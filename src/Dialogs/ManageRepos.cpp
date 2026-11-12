@@ -1,6 +1,6 @@
 /************************************************************************
  **
- **  Copyright (C) 2020-2021 Kevin B. Hendricks, Stratford Ontario Canada
+ **  Copyright (C) 2020-2024 Kevin B. Hendricks, Stratford Ontario Canada
  **
  **  This file is part of Sigil.
  **
@@ -150,10 +150,11 @@ void ManageRepos::ShowLog()
     // generate the repo log using python in a separate thread since this
     // may take a while depending on the speed of the filesystem
     PythonRoutines pr;
-    QFuture<QString> future = QtConcurrent::run(&pr,
-                                                &PythonRoutines::GenerateRepoLogSummaryInPython,
-                                                localRepo,
-                                                bookid);
+    QFuture<QString> future =
+        QtConcurrent::run(&PythonRoutines::GenerateRepoLogSummaryInPython,
+                          &pr,
+                          localRepo,
+                          bookid);
     future.waitForFinished();
     QString logData = future.result();
 

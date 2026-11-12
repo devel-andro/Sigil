@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2025 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2012      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012      Dave Heiland
 **
@@ -174,7 +174,7 @@ void StylesInCSSFilesWidget::Delete()
         QString name = m_ItemModel->itemFromIndex(index.sibling(index.row(), 1))->text();
         stylesheet_styles[bookpath].append(name);
     }
-    int count = 0;
+    // int count = 0;
     QHashIterator<QString, QStringList> it_stylesheet_styles(stylesheet_styles);
 
     while (it_stylesheet_styles.hasNext()) {
@@ -182,7 +182,7 @@ void StylesInCSSFilesWidget::Delete()
         style_names += "\n\n" + it_stylesheet_styles.key() + ": " "\n";
         foreach(QString name, it_stylesheet_styles.value()) {
             style_names += name + ", ";
-            count++;
+            // count++;
         }
         style_names = style_names.left(style_names.length() - 2);
     }
@@ -234,10 +234,7 @@ void StylesInCSSFilesWidget::Save()
     QString filter_string = "*.csv;;*.txt;;*.*";
     QString default_filter = "";
     QString save_path = m_LastDirSaved + "/" + m_LastFileSaved;
-    QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions();
 
     QString destination = QFileDialog::getSaveFileName(this,
                                                        tr("Save Report As Comma Separated File"),
@@ -253,7 +250,7 @@ void StylesInCSSFilesWidget::Save()
     try {
         Utility::WriteUnicodeTextFile(data, destination);
     } catch (CannotOpenFile&) {
-        QMessageBox::warning(this, tr("Sigil"), tr("Cannot save report file."));
+        Utility::warning(this, tr("Sigil"), tr("Cannot save report file."));
     }
 
     m_LastDirSaved = QFileInfo(destination).absolutePath();

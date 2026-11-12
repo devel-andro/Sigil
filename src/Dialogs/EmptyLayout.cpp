@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-**  Copyright (C) 2019-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2019-2025 Kevin B. Hendricks, Stratford Ontario Canada
 **
 **  This file is part of Sigil.
 **
@@ -32,7 +32,6 @@
 #include <QFileSystemModel>
 #include <QTreeView>
 #include <QModelIndex>
-#include <QDesktopWidget>
 #include <QDir>
 #include <QApplication>
 #include <QListWidget>
@@ -42,6 +41,7 @@
 #include <QKeySequence>
 #include <QMessageBox>
 #include <QDebug>
+#include <QScreen>
 
 #include "Misc/SettingsStore.h"
 #include "Misc/Utility.h"
@@ -83,7 +83,9 @@ EmptyLayout::EmptyLayout(const QString &epubversion, QWidget *parent)
     view->setAnimated(false);
     view->setIndentation(20);
     view->setSortingEnabled(true);
-    const QSize availableSize = QApplication::desktop()->availableGeometry(view).size();
+
+    const QSize availableSize = QGuiApplication::primaryScreen()->availableGeometry().size();
+
     view->resize(availableSize / 2);
     view->setColumnWidth(0, view->width() / 3);
     view->setWindowTitle(QObject::tr("Custom Epub Layout Designer"));
@@ -118,7 +120,7 @@ EmptyLayout::EmptyLayout(const QString &epubversion, QWidget *parent)
             this, SLOT(updateActions()));
 
     // assign basic shortcuts
-    delButton->     setShortcut(QKeySequence(Qt::ControlModifier + Qt::ShiftModifier + Qt::Key_Delete));
+    delButton->     setShortcut(QKeySequence(Qt::ControlModifier | Qt::ShiftModifier | Qt::Key_Delete));
     addButton->     setShortcut(QKeySequence("Ctrl+Shift+D"));
     renameButton->  setShortcut(QKeySequence("Ctrl+Shift+F2"));
     addFileButton-> setShortcut(QKeySequence("Ctrl+Shift+F"));
@@ -214,10 +216,8 @@ bool EmptyLayout::cleanEpubRoot()
 
 void EmptyLayout::loadDesign()
 {
-    QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions();
+
     QString inipath = QFileDialog::getOpenFileName(this, 
                                                    tr("Select previously saved layout design ini File"), 
                                                    m_LastDirSaved, 
@@ -282,7 +282,9 @@ void EmptyLayout::loadDesign()
     view->setAnimated(false);
     view->setIndentation(20);
     view->setSortingEnabled(true);
-    const QSize availableSize = QApplication::desktop()->availableGeometry(view).size();
+
+    const QSize availableSize = QGuiApplication::primaryScreen()->availableGeometry().size();
+
     view->resize(availableSize / 2);
     view->setColumnWidth(0, view->width() / 3);
     view->setWindowTitle(QObject::tr("Custom Epub Layout Designer"));
@@ -316,10 +318,7 @@ void EmptyLayout::saveDesign()
     QString default_filter = "ini";
     QString save_path = m_LastDirSaved + "/" + m_LastFileSaved;
 
-    QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions();
 
     QString destination = QFileDialog::getSaveFileName(this,
                                                        tr("Save current design to an ini File"),
@@ -471,13 +470,13 @@ void EmptyLayout::saveData()
     }
     if (!Errors.isEmpty()) {
         QString error_message = Errors.join('\n');
-        QMessageBox::warning(this, tr("Errors Detected"), error_message, QMessageBox::Ok);
+        Utility::warning(this, tr("Errors Detected"), error_message, QMessageBox::Ok);
         return;
     }
     m_BookPaths = bookpaths;
 
     // allow the user to set this layout as Sigil's default empty epub layout
-    bool make_default = QMessageBox::Yes == QMessageBox::warning(this, tr("Sigil"),
+    bool make_default = QMessageBox::Yes == Utility::warning(this, tr("Sigil"),
                                    tr("Do you want to set this layout as the default empty "
                                       "Epub layout for Sigil?\n\n"),
                                    QMessageBox::Yes|QMessageBox::No);

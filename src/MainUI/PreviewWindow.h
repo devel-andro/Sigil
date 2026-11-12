@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
-**  Copyright (C) 2015-2021 Doug Massay
+**  Copyright (C) 2015-2024 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2023 Doug Massay
 **  Copyright (C) 2012      Dave Heiland, John Schember
 **
 **  This file is part of Sigil.
@@ -25,11 +25,12 @@
 #ifndef PREVIEWWINDOW_H
 #define PREVIEWWINDOW_H
 
-#include <QPushButton>
 #include <QAction>
-#include <QtWebEngineWidgets/QWebEngineView>
+#include <QtWebEngineWidgets>
+#include <QtWebEngineCore>
+#include <QWebEngineView>
 #include <QtWidgets/QDockWidget>
-#include <QTimer>
+#include <QStringList>
 #include <ViewEditors/Viewer.h>
 #include <Dialogs/Inspector.h>
 
@@ -40,6 +41,10 @@ class QVBoxLayout;
 class QHBoxLayout;
 class QProgressBar;
 class OverlayHelperWidget;
+class WebViewPrinter;
+class QToolButton;
+class QWidget;
+class QFocusFrame;
 
 class PreviewWindow : public QDockWidget
 {
@@ -55,7 +60,8 @@ public:
     float GetZoomFactor();
     bool eventFilter(QObject *object, QEvent *event);
     void setMathJaxURL(QString mathjaxurl) { m_mathjaxurl = mathjaxurl; };
-    void setUserCSSURL(QString usercssurl) { m_usercssurl = usercssurl; }
+    void setUserCSSURLs(const QStringList&  usercssurls);
+    void setCacheClearNeeded();
 
 public slots:
     bool UpdatePage(QString filename, QString text, QList<ElementIndex> location);
@@ -71,7 +77,6 @@ public slots:
     void ReloadPreview();
     void InspectorClosed(int);
     void setProgress(int);
-    void ShowOverlay();
     
     /**
      * Set DockWidget titlebar text independently of tab text (when tabbed)
@@ -79,7 +84,12 @@ public slots:
      */
     void setTitleText(const QString &text);
     void previewFloated(bool wasFloated);
-
+    void CycleCustomCSS();
+    void PrintRendered();
+    void PrintStarted();
+    void PrintEnded();
+    void SetFocusOnPreview();
+    
 signals:
     void Shown();
     void ZoomFactorChanged(float factor);
@@ -103,8 +113,9 @@ signals:
 protected:
     virtual void hideEvent(QHideEvent* event);
     virtual void showEvent(QShowEvent* event);
-    void resizeEvent(QResizeEvent * event);
+    virtual void resizeEvent(QResizeEvent * event);
 
+    
     /**
      * Reimplemented from QDockWidget to enable setTitleText()
      * @param event The underlying QPaintEvent.
@@ -117,11 +128,17 @@ private:
     void ConnectSignalsToSlots();
     void UpdateWindowTitle();
     bool fixup_fullscreen_svg_images(const QString &text);
-    void SetupOverlayTimer();
     
     const QString titleText();
 
     QWidget *m_MainWidget;
+    QToolButton * m_binspect;
+    QToolButton * m_bselect;
+    QToolButton * m_bcopy;
+    QToolButton * m_breload;
+    QToolButton * m_bcycle;
+    QToolButton * m_bprint;
+    QFrame *m_wrapper;
     QVBoxLayout *m_Layout;
     QHBoxLayout *m_buttons;
     OverlayHelperWidget *m_overlayBase;
@@ -134,18 +151,26 @@ private:
     QString m_titleText;
 
     QString m_mathjaxurl;
-    QString m_usercssurl;
+    QStringList m_usercssurls;
 
     QAction * m_inspectAction;
     QAction * m_selectAction;
     QAction * m_copyAction;
     QAction * m_reloadAction;
+    QAction * m_cycleCSSAction;
+    QAction * m_webviewPrint;
 
     QList<ElementIndex> m_location;
     
-    QTimer m_OverlayTimer;
     bool m_updatingPage;
     bool m_usingMathML;
+    int m_cycleCSSLevel;
+
+    bool m_skipPrintPreview;
+    WebViewPrinter *m_WebViewPrinter;
+    bool m_use_focus_highlight;
+    bool m_cache_clear_needed = false;
+
 };
 
 #endif // PREVIEWWINDOW_H

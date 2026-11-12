@@ -8,9 +8,12 @@
         <file>automate_2.svg</file>
         <file>automate_3.svg</file>
         <file>back-to-link-style.svg</file>
+        <file>bookmark.svg</file>
+        <file>busy-working.svg</file>
         <file>case-change.svg</file>
         <file>chevron-down.svg</file>
         <file>chevron-up.svg</file>
+        <file>cycle-css.svg</file>
         <file>document-add.svg</file>
         <file>document-edit.svg</file>
         <file>document-new.svg</file>
@@ -49,6 +52,7 @@
         <file>format-text-subscript.svg</file>
         <file>format-text-superscript.svg</file>
         <file>format-text-underline.svg</file>
+        <file>function.svg</file>
         <file>generate-toc.svg</file>
         <file>git-checkout.svg</file>
         <file>git-commit.svg</file>
@@ -67,6 +71,8 @@
         <file>index-create.svg</file>
         <file>index-edit.svg</file>
         <file>index-mark.svg</file>
+        <file>insert-aria-clip.svg</file>
+        <file>insert-aria-role.svg</file>
         <file>insert-bullet-list.svg</file>
         <file>insert-hyperlink.svg</file>
         <file>insert-id.svg</file>
@@ -93,5 +99,18 @@
         <file>split-section.svg</file>
         <file>tag-pair-remove.svg</file>
         <file>widget-close.svg</file>
+        <file>count-all.svg</file>
+        <file>find.svg</file>
+        <file>replace-all.svg</file>
+        <file>replace-find.svg</file>
+        <file>replace.svg</file>
+        <file>restart.svg</file>
+        <file>crop.svg</file>
+        <file>resize.svg</file>
+        <file>rotate-left.svg</file>
+        <file>rotate-right.svg</file>
+        <file>zoom-in.svg</file>
+        <file>zoom-out.svg</file>
+        <file>zoom-to-window.svg</file>
    </qresource>
 </RCC>

@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2020 Kevin B. Hendricks, Stratford Ontario, Canada
+**  Copyright (C) 2019-2026 Kevin B. Hendricks, Stratford Ontario, Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -24,22 +24,25 @@
 #ifndef IMAGETAB_H
 #define IMAGETAB_H
 
-#include <QtCore/QUrl>
+#include <QUrl>
 #include <QPointer>
 
 #include "Tabs/ContentTab.h"
 
 class ImageResource;
-class QWebEngineView;
 class QAction;
 class QMenu;
+class QEvent;
+class QKeyEvent;
+class AdjustImage;
+class WebViewPrinter;
+class Resource;
 
 class ImageTab : public ContentTab
 {
     Q_OBJECT
 
 public:
-
     ImageTab(ImageResource *resource, QWidget *parent = 0);
     ~ImageTab();
 
@@ -50,6 +53,12 @@ public:
 
     void UpdateDisplay();
 
+    void ThemeChangeRefresh();
+
+signals:
+
+    void ImageContentChanged(Resource * resource);
+
 public slots:
     void RefreshContent();
 
@@ -59,9 +68,30 @@ public slots:
     void saveAs();
     void copyImage();
 
+    void HandleInternalImageZoomChange(double factor);
+
     void Print();
     void PrintPreview();
+    
+    void SaveChanges();
+    void ZoomIn();
+    void ZoomOut();
+    void ZoomToFit();
+    void Undo();
+    void Redo();
+    void RotateLeft();
+    void RotateRight();
+    void CropImage();
+    void ResizeImage();
+    void ReloadImageFromDisk();
 
+    void EmitImageContentChanged();
+
+
+protected:
+    bool event(QEvent* event) override;
+    void keyPressEvent(QKeyEvent* event) override;                                 
+                       
 private slots:
 
     /**
@@ -91,11 +121,13 @@ private:
 
     void Zoom();
 
+    QString PageSourceForPrinting(QString& file_path);
+
     ///////////////////////////////
     // PRIVATE MEMBER VARIABLES
     ///////////////////////////////
 
-    QWebEngineView *m_WebView;
+    AdjustImage *m_AdjImg;
 
     QPointer<QMenu> m_ContextMenu;
     QMenu *m_OpenWithContextMenu;
@@ -107,11 +139,24 @@ private:
     QAction *m_OpenWithEditor3;
     QAction *m_OpenWithEditor4;
     QSignalMapper *m_openWithMapper;
-
     QAction *m_SaveAs;
     QAction *m_CopyImage;
+    QAction *m_SaveChanges;
+    QAction *m_ZoomIn;
+    QAction *m_ZoomOut;
+    QAction *m_ZoomToFit;
+    QAction *m_Undo;
+    QAction *m_Redo;
+    QAction *m_RotateLeft;
+    QAction *m_RotateRight;
+    QAction *m_CropImage;
+    QAction *m_ResizeImage;
+    QAction *m_ReloadImageFromDisk;
 
     float m_CurrentZoomFactor;
+
+    WebViewPrinter * m_WebViewPrinter;
+    QString m_filepath;
 };
 
 #endif // IMAGETAB_H

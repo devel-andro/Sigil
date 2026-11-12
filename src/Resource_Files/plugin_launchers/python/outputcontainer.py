@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim:ts=4:sw=4:softtabstop=4:smarttab:expandtab
 
-# Copyright (c) 2015-2020 Kevin B. Hendricks, and Doug Massay
+# Copyright (c) 2015-2025 Kevin B. Hendricks, and Doug Massay
 # Copyright (c) 2014      Kevin B. Hendricks, John Schember, and Doug Massay
 # All rights reserved.
 #
@@ -273,6 +273,11 @@ class OutputContainer(object):
         return self._w.epub_filepath
 
 
+    # New for Sigil 2.2.0
+    def	font_bookpath_to_preferred_obfuscation_algorithm(self, bookpath, ow=None):
+        return self._w.map_font_bookpath_to_mangling_algorithm(bookpath, ow)
+
+
     # functions for converting from  manifest id to href, basename, mimetype etc
     def href_to_id(self, href, ow=None):
         return self._w.map_href_to_id(href, ow)
@@ -394,3 +399,10 @@ class OutputContainer(object):
 
     def mediatype_to_group(self, mediatype, ow=None):
         return self._w.map_mediatype_to_group(mediatype, ow)
+
+    # Newly Added to Support Plugins running in Automate Lists
+    def using_automate(self):
+        return self._w.using_automate
+
+    def	automate_parameter(self):
+        return self._w.automate_parameter

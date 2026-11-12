@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2019 Kevin B. Hendricks, Stratford, Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford, Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -64,7 +64,8 @@ public:
         NCXResourceType      = 1 <<  9, /**< Used for the NCX table of contents. */
         MiscTextResourceType = 1 <<  10, /**< Used for editable text resource. */
         AudioResourceType    = 1 <<  11, /**< Used for Audio resources. */
-        VideoResourceType    = 1 <<  12  /**< Used for Video resources. */
+        VideoResourceType    = 1 <<  12, /**< Used for Video resources. */
+        PdfResourceType      = 1 <<  13  /**< Used for PDF resources. */
     };
 
     /**
@@ -163,6 +164,16 @@ public:
 
     QString GetFullPathToBookFolder() const;
 
+    void SetSavedCRC32(const QString& newcrc32) { m_SavedCRC32 = newcrc32; }
+    QString GetSavedCRC32() { return m_SavedCRC32; }
+
+    void SetSavedDate(const QString& modified) { m_SavedDate = modified; }
+    QString GetSavedDate() { return m_SavedDate; }
+
+    void SetSavedSize(const size_t info) { m_SavedSize = info; }
+    size_t GetSavedSize() { return m_SavedSize; }
+
+
     /**
      * Returns a reference to the resource's ReadWriteLock.
      *
@@ -183,7 +194,7 @@ public:
      * @param new_filename The new name.
      * @return \c true if the operation was successful.
      */
-    virtual bool RenameTo(const QString &new_filename);
+    virtual bool RenameTo(const QString &new_filename, bool in_bulk=false);
 
 
     /**
@@ -192,7 +203,7 @@ public:
      * @param new_bookpath The new bookpath.
      * @return \c true if the operation was successful.
      */
-    virtual bool MoveTo(const QString &new_bookpath);
+    virtual bool MoveTo(const QString &new_bookpath, bool in_bulk=false);
 
     /**
      * Deletes the resource.
@@ -234,12 +245,18 @@ signals:
     void Renamed(const Resource *resource, QString old_full_path);
 
     /**
+     * Emitted whena resource is renamed or moved under builk mode
+     *
+     */
+    void TellTabUpdateName(const Resource *resource, QString old_full_path);
+
+    /**
      * Emitted whenever the resource changes location.
      *
      * @param resource The resource's that was moved.
      */
     void Moved(const Resource *resource, QString old_full_path);
-
+        
     /**
      * Emitted when the resource has been scheduled for deletion.
      *
@@ -330,6 +347,12 @@ private:
 
 
     QString m_ShortName;
+
+    QString m_SavedCRC32;
+
+    QString m_SavedDate;
+
+    size_t m_SavedSize = 0;
 
     /**
      * The ReadWriteLock guarding access to the resource's data.

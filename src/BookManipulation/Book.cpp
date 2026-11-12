@@ -1,6 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021  Kevin B. Hendricks Stratford, ON, Canada 
+**  Copyright (C) 2015-2026  Kevin B. Hendricks Stratford, ON, Canada
+**  Copyright (C) 2026       Doug Massay
 **  Copyright (C) 2009-2011  Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -20,17 +21,20 @@
 **
 *************************************************************************/
 
-#include <QtCore/QtCore>
-#include <QtCore/QFileInfo>
-#include <QtCore/QFutureSynchronizer>
+#include <QtCore>
+#include <QFileInfo>
+#include <QFutureSynchronizer>
 #include <QtConcurrent/QtConcurrent>
-#include <QtWidgets/QApplication>
-#include <QtWidgets/QProgressDialog>
+#include <QApplication>
+#include <QProgressDialog>
 
 #include "BookManipulation/Book.h"
 #include "BookManipulation/CleanSource.h"
 #include "BookManipulation/FolderKeeper.h"
 #include "Parsers/GumboInterface.h"
+#include "Parsers/CSSToolbox.h"
+#include "Parsers/CSSInfo.h"
+#include "Parsers/HTMLStyleInfo.h"
 #include "Misc/TempFolder.h"
 #include "Misc/Utility.h"
 #include "Misc/HTMLSpellCheck.h"
@@ -212,9 +216,9 @@ const QString HTML5_COVER_SOURCE =
     "</head>\n"
     ""
     "<body>\n"
-    "  <div style=\"text-align: center; padding: 0pt; margin: 0pt;\">\n"
+    "  <div style=\"height: 100vh; text-align: center; padding: 0pt; margin: 0pt;\">\n"
     "    <svg xmlns=\"http://www.w3.org/2000/svg\" height=\"100%\" preserveAspectRatio=\"xMidYMid meet\" version=\"1.1\" viewBox=\"0 0 SGC_IMAGE_WIDTH SGC_IMAGE_HEIGHT\" width=\"100%\" xmlns:xlink=\"http://www.w3.org/1999/xlink\">\n"
-    "      <image width=\"SGC_IMAGE_WIDTH\" height=\"SGC_IMAGE_HEIGHT\" xlink:href=\"SGC_IMAGE_FILENAME\"/>\n"
+    "      <image width=\"SGC_IMAGE_WIDTH\" height=\"SGC_IMAGE_HEIGHT\" xlink:href=\"SGC_IMAGE_FILENAME\" href=\"SGC_IMAGE_FILENAME\" />\n"
     "    </svg>\n"
     "  </div>\n"
     "</body>\n"
@@ -348,11 +352,20 @@ HTMLResource *Book::CreateEmptyHTMLFile(const QString &folderpath)
 {
     HTMLResource *html_resource = CreateNewHTMLFile(folderpath);
     QString version = html_resource->GetEpubVersion();
+    QString data;
+    QString template_path;
     if (version.startsWith('2')) {
-        html_resource->SetText(EMPTY_HTML_FILE);
+        template_path = Utility::DefinePrefsDir() + "/" + "user-template2.xhtml";
+        data = EMPTY_HTML_FILE;
     } else {
-        html_resource->SetText(EMPTY_HTML5_FILE);
+        template_path = Utility::DefinePrefsDir() + "/" + "user-template3.xhtml";
+        data = EMPTY_HTML5_FILE;
     }
+    if (QFile::exists(template_path)) {
+        data = CleanSource::Mend(Utility::ReadUnicodeTextFile(template_path), version);
+    }
+    html_resource->SetText(data);
+    html_resource->SaveToDisk();
     SetModified(true);
     return html_resource;
 }
@@ -413,8 +426,8 @@ HTMLResource *Book::CreateEmptyNavFile(bool update_opf,
     HTMLResource * html_resource = qobject_cast<HTMLResource *>(resource);
     SettingsStore ss;
     QString defaultLanguage = ss.defaultMetadataLang();
-    QString navtitle = Landmarks::instance()->GetName("toc");
-    QString guidetitle = Landmarks::instance()->GetName("landmarks");
+    QString navtitle = Landmarks::instance().GetName("toc");
+    QString guidetitle = Landmarks::instance().GetName("landmarks");
     QString start = tr("Start");
     QString navtext = 
         EMPTY_NAV_FILE_START.arg(defaultLanguage).arg(defaultLanguage).arg(stylehref) +
@@ -428,47 +441,16 @@ HTMLResource *Book::CreateEmptyNavFile(bool update_opf,
 }
 
 
-HTMLResource *Book::CreateEmptyHTMLFile(HTMLResource *resource, const QString &folderpath)
-{
-    HTMLResource *new_resource = CreateNewHTMLFile(folderpath);
-    QString version = new_resource->GetEpubVersion();
-    if (version.startsWith('2')) {
-        new_resource->SetText(EMPTY_HTML_FILE);
-    } else {
-        new_resource->SetText(EMPTY_HTML5_FILE);
-    }
-    if (resource != NULL) {
-        QList<HTMLResource *> html_resources = m_Mainfolder->GetResourceTypeList<HTMLResource>(true);
-        int reading_order = GetOPF()->GetReadingOrder(resource) + 1;
-
-        if (reading_order > 0) {
-            html_resources.insert(reading_order, new_resource);
-            GetOPF()->UpdateSpineOrder(html_resources);
-        }
-    }
-
-    SetModified(true);
-    return new_resource;
-}
-
-
 void Book::MoveResourceAfter(HTMLResource *from_resource, HTMLResource *to_resource)
 {
     if (from_resource == NULL || to_resource == NULL) {
         return;
     }
 
-    QList<HTMLResource *> html_resources = m_Mainfolder->GetResourceTypeList<HTMLResource>(true);
-    int to_after_reading_order = GetOPF()->GetReadingOrder(to_resource) + 1;
-    int from_reading_order = GetOPF()->GetReadingOrder(from_resource) ;
-
-    if (to_after_reading_order > 0) {
-        html_resources.move(from_reading_order, to_after_reading_order);
-        GetOPF()->UpdateSpineOrder(html_resources);
-    }
-
+    GetOPF()->MoveReadingOrder(from_resource, to_resource);
     SetModified(true);
 }
+
 
 HTMLResource *Book::CreateHTMLCoverFile(QString text)
 {
@@ -487,6 +469,11 @@ HTMLResource *Book::CreateHTMLCoverFile(QString text)
 
     // Move file to start of book.
     QList<HTMLResource *> html_resources = m_Mainfolder->GetResourceTypeList<HTMLResource>(true);
+    if (version.startsWith("3")) {
+        if (!GetConstOPF()->isNavInSpine()) {
+            html_resources.removeOne(GetConstOPF()->GetNavResource());
+        }
+    }
     html_resources.removeOne(html_resource);
     html_resources.prepend(html_resource);
     GetOPF()->UpdateSpineOrder(html_resources);
@@ -523,6 +510,19 @@ CSSResource *Book::CreateEmptyCSSFile(const QString &folderpath)
                                                                QString(),
                                                                folderpath);
     CSSResource *css_resource = qobject_cast<CSSResource *>(resource);
+    QString version = css_resource->GetEpubVersion();
+    QString data = "";
+    QString template_path;
+    if (version.startsWith('2')) {
+        template_path = Utility::DefinePrefsDir() + "/" + "user-template2.css";
+    } else {
+        template_path = Utility::DefinePrefsDir() + "/" + "user-template3.css";
+    }
+    if (QFile::exists(template_path)) {
+        data = Utility::ReadUnicodeTextFile(template_path);
+    }
+    css_resource->SetText(data);
+    css_resource->SaveToDisk();
     SetModified(true);
     return css_resource;
 }
@@ -575,10 +575,15 @@ HTMLResource *Book::CreateSectionBreakOriginalResource(const QString &content, H
     int reading_order = GetOPF()->GetReadingOrder(originating_resource);
     Q_ASSERT(reading_order >= 0);
     QList<HTMLResource *> html_resources = m_Mainfolder->GetResourceTypeList<HTMLResource>(true);
+    QString version = GetConstOPF()->GetEpubVersion();
+    if (version.startsWith("3")) {
+        if (!GetConstOPF()->isNavInSpine()) {
+            html_resources.removeOne(GetConstOPF()->GetNavResource());
+        }
+    }
     QString old_extension = originating_filename.right(originating_filename.length() - originating_filename.lastIndexOf("."));
     originating_resource->RenameTo(GetFirstUniqueSectionName(old_extension));
     HTMLResource *new_resource = CreateNewHTMLFile(folder_path);
-    QString version = GetOPF()->GetEpubVersion();
     new_resource->RenameTo(originating_filename);
     new_resource->SetText(CleanSource::Mend(content, version));
     m_Mainfolder->SuspendWatchingResources();
@@ -618,11 +623,9 @@ void Book::CreateNewSections(const QStringList &new_sections, HTMLResource *orig
     QString new_file_prefix = QFileInfo(original_resource->Filename()).baseName();
     QString file_extension = "." + QFileInfo(original_resource->Filename()).suffix();
     QString folder_path = Utility::startingDir(original_resource->GetRelativePath());
-
     if (new_sections.isEmpty()) {
         return;
     }
-
     TempFolder tempfolder;
     QFutureSynchronizer<NewSectionResult> sync;
     QList<HTMLResource *> html_resources = m_Mainfolder->GetResourceTypeList<HTMLResource>(true);
@@ -630,6 +633,12 @@ void Book::CreateNewSections(const QStringList &new_sections, HTMLResource *orig
     // This will be used later when anchors are updated.
     QList<HTMLResource *> other_files = html_resources;
     other_files.removeOne(original_resource);
+    QString version = GetConstOPF()->GetEpubVersion();
+    if (version.startsWith("3")) {
+        if (!GetConstOPF()->isNavInSpine()) {
+            html_resources.removeOne(GetConstOPF()->GetNavResource());
+        }
+    }
     int next_reading_order;
 
     if (original_position == -1) {
@@ -648,11 +657,7 @@ void Book::CreateNewSections(const QStringList &new_sections, HTMLResource *orig
         sectionInfo.file_suffix = i;
         sectionInfo.file_extension = file_extension;
         sectionInfo.folder_path = folder_path;
-        sync.addFuture(
-            QtConcurrent::run(
-                this,
-                &Book::CreateOneNewSection,
-                sectionInfo));
+        sync.addFuture(QtConcurrent::run(&Book::CreateANewSection, this, sectionInfo));
     }
 
     sync.waitForFinished();
@@ -720,13 +725,62 @@ bool Book::IsDataOnDiskWellFormed(HTMLResource *html_resource)
     return error.line == -1;
 }
 
+
+bool Book::IsDataGumboWellFormed(HTMLResource *html_resource)
+{
+    XhtmlDoc::WellFormedError error = XhtmlDoc::GumboWellFormedErrorForSource(html_resource->GetText(),
+                                                                               html_resource->GetEpubVersion());
+    return error.line == -1;
+}
+
+
+bool Book::RenameClassInHTML(const QString css_bookpath, const QString oldname, const QString newname)
+{
+    const QList<HTMLResource *> html_resources = m_Mainfolder->GetResourceTypeList<HTMLResource>(false);
+    QFuture< bool > rfuture;
+    rfuture = QtConcurrent::mapped(html_resources, std::bind(Book::RenameClassInHTMLFileMapped,
+                                                             std::placeholders::_1,
+                                                             css_bookpath,
+                                                             oldname,
+                                                             newname));
+    bool result = true;
+    for (int i = 0; i < rfuture.results().count(); i++) {
+        result = result && rfuture.resultAt(i);
+    }
+    return result;
+}
+
+
+bool Book::RenameClassInHTMLFileMapped(HTMLResource* html_resource,
+                                       const QString css_bookpath,
+                                       const QString oldname,
+                                       const QString newname)
+{
+    QStringList linked_stylesheets = html_resource->GetLinkedStylesheets();
+    QString xhtmltext = html_resource->GetText();
+    if (linked_stylesheets.contains(css_bookpath)) {
+        QWriteLocker locker(&html_resource->GetLock());
+        CSSToolbox tb;
+        QString newtext = tb.rename_class_in_text(oldname, newname, xhtmltext);
+        if (xhtmltext != newtext) {
+            html_resource->SetText(newtext);
+        }
+    }
+    return true;
+}
+
+
 void Book::ReformatAllHTML(bool to_valid)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
-
     SaveAllResourcesToDisk();
     QList<HTMLResource *> html_resources = m_Mainfolder->GetResourceTypeList<HTMLResource>(true);
-    bool book_modified = CleanSource::ReformatAll(html_resources, to_valid ? CleanSource::Mend : CleanSource::MendPrettify);
+    bool book_modified = false; 
+    if (to_valid) {
+        book_modified = CleanSource::ReformatMendAll(html_resources);
+    } else {
+        book_modified = SafePrettyPrintResources(html_resources);
+    }
     if (book_modified) {
         SetModified();
     }
@@ -973,8 +1027,44 @@ QHash<QString, QStringList> Book::GetHTMLFilesUsingMedia()
             html_files[media_bookpath].append(html_bookpath);
         }
     }
-
     return html_files;
+}
+
+QHash<QString, QStringList> Book::GetHTMLFilesUsingMediaInStyleUrls()
+{
+    QHash<QString, QStringList> html_files;
+    const QList<HTMLResource *> html_resources = m_Mainfolder->GetResourceTypeList<HTMLResource>(false);
+
+    QFuture<std::tuple<QString, QStringList>> future = QtConcurrent::mapped(html_resources, GetStyleUrlsInHTMLFileMapped);
+
+    for (int i = 0; i < future.results().count(); i++) {
+        QString html_bookpath;
+        QStringList url_bookpaths;
+        std::tie(html_bookpath, url_bookpaths) = future.resultAt(i);
+        foreach(QString url_bookpath, url_bookpaths) {
+            html_files[url_bookpath].append(html_bookpath);
+        }
+    }
+    return html_files;
+}
+
+QHash<QString, QStringList> Book::GetCSSFilesUsingUrls()
+{
+    QHash<QString, QStringList> css_files;
+    const QList<CSSResource*> css_resources = m_Mainfolder->GetResourceTypeList<CSSResource>(false);
+
+    QFuture<std::tuple<QString, QStringList>> future = QtConcurrent::mapped(css_resources, GetUrlsInCSSFileMapped);
+
+    for (int i = 0; i < future.results().count(); i++) {
+        QString css_bookpath;
+        QStringList url_bookpaths;
+        std::tie(css_bookpath, url_bookpaths) = future.resultAt(i);
+        foreach(QString url_bookpath, url_bookpaths) {
+            css_files[url_bookpath].append(css_bookpath);
+        }
+    }
+
+    return css_files;
 }
 
 QHash<QString, QStringList> Book::GetHTMLFilesUsingImages()
@@ -1010,6 +1100,27 @@ std::tuple<QString, QStringList> Book::GetMediaInHTMLFileMapped(HTMLResource *ht
         }
     }
     return std::make_tuple(html_bookpath, media_bookpaths);
+}
+
+std::tuple<QString, QStringList> Book::GetUrlsInCSSFileMapped(CSSResource *css_resource)
+{
+    QString css_bookpath = css_resource->GetRelativePath();
+    QString startdir = css_resource->GetFolder();
+    QRegularExpression url_file_search("url\\s*\\(\\s*['\"]?([^\\(\\)'\"]*)[\"']?\\)");
+
+    QStringList url_bookpaths;
+    CSSInfo css_info(css_resource->GetText());
+    QStringList urllist = css_info.getAllPropertyValues("");
+    foreach (QString url, urllist) {
+        QRegularExpressionMatch match = url_file_search.match(url);
+        if (match.hasMatch()) {
+            QString ahref = match.captured(1);
+            if (ahref.indexOf(":") == -1) {
+                url_bookpaths << Utility::buildBookPath(ahref, startdir);
+            }
+        }
+    }
+    return std::make_tuple(css_bookpath, url_bookpaths);
 }
 
 std::tuple<QString, QStringList> Book::GetImagesInHTMLFileMapped(HTMLResource *html_resource)
@@ -1103,7 +1214,8 @@ QSet<QString> Book::GetWordsInHTMLFiles()
         all_words.append(result);
     }
 
-    return all_words.toSet();  // Qt 5.15:  QSet<QString>(all_words.begin(), all_words.end());
+    QSet<QString> allwordset(all_words.begin(), all_words.end());
+    return allwordset;
 }
 
 QStringList Book::GetWordsInHTMLFileMapped(HTMLResource *html_resource, const QString& default_lang)
@@ -1194,7 +1306,6 @@ QPair<QString, QString> Book::UpdateAndExtractBodyInOneFile(Resource * resource,
     QString startdir = htmlresource->GetFolder();
     QString version = htmlresource->GetEpubVersion();
     QString bookpath = htmlresource->GetRelativePath();
-    qDebug() << "update and extract body of " << bookpath;
     GumboInterface gi = GumboInterface(htmlresource->GetText(), version);
     gi.parse();
     const QList<GumboNode*> anchor_nodes = gi.get_all_nodes_with_tag(GUMBO_TAG_A);
@@ -1237,7 +1348,6 @@ Resource *Book::MergeResources(QList<Resource *> resources)
         // return the nav_resource as the failed resource
         return nav_resource;
     }
-
     // nothing to merge
     if (resources.size() < 2) return NULL;
 
@@ -1259,12 +1369,12 @@ Resource *Book::MergeResources(QList<Resource *> resources)
     }
 
     Resource *sink_resource = resources.at(0);
+    QString version = sink_resource->GetEpubVersion(); 
     HTMLResource *sink_html_resource = qobject_cast<HTMLResource *>(sink_resource);
-
+    
     const QList<QPair<QString, QString>> &bodies = QtConcurrent::blockingMapped(resources, 
-                                                                                std::bind(UpdateAndExtractBodyInOneFile, 
-                                                                                          std::placeholders::_1,
-                                                                                          merged_bookpaths));
+                                                       std::bind(UpdateAndExtractBodyInOneFile, std::placeholders::_1,
+                                                       merged_bookpaths));
     // collect the outputs from the many threads
     QHash<QString, QString> updated_bodies;
     for (int i = 0; i < bodies.count(); ++i) {
@@ -1291,7 +1401,11 @@ Resource *Book::MergeResources(QList<Resource *> resources)
         } else {
             QString section_id = Utility::GenerateUniqueId("section", UsedIds);
             UsedIds.insert(section_id);
-            new_bodies.append("  <a id=\"" + section_id + "\"></a>\n" + updated_bodies[bookpath]);
+            if (version.startsWith("3")) {
+                new_bodies.append("  <a id=\"" + section_id + "\"></a>\n" + updated_bodies[bookpath]);
+            } else {
+                new_bodies.append("  <p id=\"" + section_id + "\" style=\"display:none\"></p>\n" + updated_bodies[bookpath]);
+            }
             section_id_map[bookpath] = section_id;
         }
         i++;
@@ -1302,7 +1416,6 @@ Resource *Book::MergeResources(QList<Resource *> resources)
 
     // Anchor Updates should handle updating all links in the nav properly
     // But if this is an epub2, then we must update the guide entries as well
-    QString version = sink_resource->GetEpubVersion(); 
     if (version.startsWith("2")) {
         GetOPF()->UpdateGuideAfterMerge(resources, section_id_map);
     }
@@ -1457,7 +1570,7 @@ void Book::SaveOneResourceToDisk(Resource *resource)
 }
 
 
-Book::NewSectionResult Book::CreateOneNewSection(NewSection section_info)
+Book::NewSectionResult Book::CreateANewSection(NewSection section_info)
 {
     return CreateOneNewSection(section_info, QHash<QString, QString>());
 }
@@ -1534,4 +1647,104 @@ QPair<QString, QStringList> Book::GetOneFileIDs(HTMLResource *html_resource)
     id_pair.first = html_resource->GetRelativePath();
     id_pair.second = ids;
     return id_pair;
+}
+
+
+bool Book::XhtmlUsesStyleProperty(HTMLResource* html_resource, QString property)
+{
+    QString newsource;
+    // first check all internal style attributes
+    {
+        QReadLocker locker(&html_resource->GetLock());
+        newsource = html_resource->GetText();
+    }
+    QString version = html_resource->GetEpubVersion();
+    GumboInterface gi = GumboInterface(newsource, version);
+    gi.parse();
+    QStringList styles = gi.get_all_values_for_attribute(QString("style"));
+    foreach(QString style_value, styles){
+        if (style_value.indexOf(property) >= 0) return true;
+    }
+    // next get and parse any style tags inside the file
+    HTMLStyleInfo hp(newsource);
+    if (hp.hasStyles()) {
+        QStringList pvs = hp.getAllPropertyValues(property);
+        if (!pvs.isEmpty()) return true;
+    }    
+    // Finally, walk the linked css files to check there
+    QStringList css_file_paths = html_resource->GetPathsToLinkedResources();
+    foreach(QString css_path, css_file_paths) {
+        Resource* resource = GetFolderKeeper()->GetResourceByBookPathNoThrow(css_path);
+        if (resource) {
+            CSSResource* css_resource = qobject_cast<CSSResource*>(resource);
+            if (css_resource) {
+                CSSInfo cp(css_resource->GetText());
+                QStringList pvs = cp.getAllPropertyValues(property);
+                if (!pvs.isEmpty()) return true;
+            }
+        }
+    }
+    // that property was not found
+    return false;
+}
+
+
+bool Book::SafePrettyPrintResources(QList<HTMLResource*> resources)
+{
+    foreach (HTMLResource * hresource, resources) {
+        if (!IsDataGumboWellFormed(hresource)) {
+            Utility::warning(Utility::GetMainWindow(), tr("Sigil"),
+                                 tr("PrettyPrint cancelled: %1, XML not well formed.").arg(hresource->ShortPathName()));
+            return false;
+        }
+    }
+    QProgressDialog progress(QObject::tr("PrettyPrinting..."), 0, 0, resources.count(), Utility::GetMainWindow());
+    progress.setMinimumDuration(PROGRESS_BAR_MINIMUM_DURATION);
+    int progress_value = 0;
+    progress.setValue(progress_value);
+    bool book_modified = false;
+    foreach(HTMLResource * html_resource, resources) {
+        progress.setValue(progress_value++);
+        qApp->processEvents();
+        QString version = html_resource->GetEpubVersion();
+        QString original_source;
+        QString newsource;
+        {   
+            QReadLocker locker(&html_resource->GetLock());
+            original_source = html_resource->GetText();
+        }
+        newsource = original_source;
+        bool keep_whitespace = XhtmlUsesStyleProperty(html_resource, "white-space") ||
+                               XhtmlUsesStyleProperty(html_resource, "white-space-collapse");
+        newsource = CleanSource::PrettyPrint(newsource, keep_whitespace, version);
+        if (newsource != original_source) {
+            book_modified = true;
+            {
+                QWriteLocker locker(&html_resource->GetLock());
+                html_resource->SetText(newsource);
+            }
+        }
+    }
+    return book_modified;
+}
+
+
+QString Book::SafePrettyPrint(const QString& bookpath, const QString& original_text)
+{
+    Resource* resource = GetFolderKeeper()->GetResourceByBookPathNoThrow(bookpath);
+    QString newsource = original_text;
+    if (resource) {
+        HTMLResource* html_resource = qobject_cast<HTMLResource*>(resource);
+        if (html_resource) {
+            if (!IsDataGumboWellFormed(html_resource)) {
+                Utility::warning(Utility::GetMainWindow(), tr("Sigil"),
+                                 tr("PrettyPrint cancelled: %1, XML not well formed.").arg(html_resource->ShortPathName()));
+                return original_text;
+            }
+            QString version = html_resource->GetEpubVersion();
+            bool keep_whitespace = XhtmlUsesStyleProperty(html_resource, "white-space");
+            newsource = CleanSource::PrettyPrint(newsource, keep_whitespace, version);
+        }
+    }
+    return newsource;
 }

@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2019 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2024 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2016-2020 Doug Massay
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
@@ -29,12 +29,16 @@
 #include <QCoreApplication>
 #include <QtCore/QString>
 #include <QColor>
+#include <QMessageBox>
 #include <QSet>
+#include <QStringList>
+#include <QImage>
+#include <QFileDialog>
 
-class QStringList;
-class QStringRef;
+class QStringView;
 class QWidget;
 class QMenu;
+
 
 struct ExceptionBase;
 
@@ -84,10 +88,10 @@ public:
     // For instance, "test" and "TEST" return false, "teSt" returns true.
     static bool IsMixedCase(const QString &string);
 
-    // Returns a substring of a QStringRef as a real string
+    // Returns a substring of a QStringView as a real string
     // the characters included are in the interval:
     // [ start_index, end_index >
-    static QString Substring(int start_index, int end_index, const QStringRef &string);
+    static QString Substring(int start_index, int end_index, const QStringView string);
 
     // Returns a substring of a specified string;
     // the characters included are in the interval:
@@ -97,7 +101,7 @@ public:
     // Returns a substring of a specified string;
     // the characters included are in the interval:
     // [ start_index, end_index >
-    static QStringRef SubstringRef(int start_index, int end_index, const QString &string);
+    static QStringView SubstringView(int start_index, int end_index, const QString &string);
 
     // Replace the first occurrence of string "before"
     // with string "after" in string "string"
@@ -116,6 +120,10 @@ public:
 
     static bool ForceCopyFile(const QString &fullinpath, const QString &fulloutpath);
 
+    // Copy File from src (full abs path) to dest (full abs path) with write with truncation
+    // without ever deleting the dest file file first
+    static bool OverWriteFileWith(const QString src, const QString dest);
+
     static bool SMoveFile(const QString &oldfilepath, const QString &newfilepath);
 
     static bool RenameFile(const QString &oldfilepath, const QString &newfilepath);
@@ -133,15 +141,19 @@ public:
     // Reads the text file specified with the full file path;
     // text needs to be in UTF-8 or UTF-16; if the file cannot
     // be read, an error dialog is shown and an empty string returned
-    static QString ReadUnicodeTextFile(const QString &fullfilepath);
+    static QString ReadUnicodeTextFile(const QString &fullfilepath, bool canthrow=true);
 
     // Writes the provided text variable to the specified
     // file; if the file exists, it is truncated
-    static void WriteUnicodeTextFile(const QString &text, const QString &fullfilepath);
+    static void WriteUnicodeTextFile(const QString &text, const QString &fullfilepath, bool canthrow=true);
 
     // Converts Mac and Windows style line endings to Unix style
     // line endings that are expected throughout the Qt framework
-    static QString ConvertLineEndings(const QString &text);
+    // while converting to Unicode Normalization Form C
+    // Note the mac did and does use a modified NFD form for its HFS+ file system
+    // so manifest and other urls can have the wrong form on a mac depending
+    // on filesystem in use.
+    static QString ConvertLineEndingsAndNormalize(const QString &text);
 
     // Decodes XML escaped string to normal text
     // &amp; -> &    &apos; -> '  &quot; -> "   &lt; -> <  &gt; -> >
@@ -170,9 +182,9 @@ public:
      */
     static QString URLDecodePath(const QString &path);
 
-    static void DisplayStdErrorDialog(const QString &error_message, const QString &detailed_text = QString());
+    static void DisplayStdErrorDialog(const QString &error_message, const QString &detailed_text = QString(), QWidget* parent = nullptr);
 
-    static void DisplayStdWarningDialog(const QString &warning_message, const QString &detailed_text = QString());
+    static void DisplayStdWarningDialog(const QString &warning_message, const QString &detailed_text = QString(), QWidget* parent = nullptr);
 
     static void DisplayExceptionErrorDialog(const QString &error_info);
 
@@ -185,6 +197,8 @@ public:
 
     static QWidget *GetMainWindow();
 
+    static QString GetMainWindowMetadata();
+
     static QString getSpellingSafeText(const QString &raw_text);
 
     static bool has_non_ascii_chars(const QString &str);
@@ -192,7 +206,6 @@ public:
 
 #if defined(Q_OS_WIN32)
     static std::wstring QStringToStdWString(const QString &str);
-    static QString stdWStringToQString(const std::wstring &str);
 #endif
 
     static bool UnZip(const QString &zippath, const QString &destdir);
@@ -220,7 +233,10 @@ public:
     
     static QString startingDir(const QString &file_bookpath);
 
-    // sort list of strings by list of counts in a decreasing fashion, highest count first
+    // sorting string pairs
+    static bool sort_string_pairs_by_first(const std::pair<QString,QString> &a, const std::pair<QString,QString> &b);
+
+    // sorting strings by list of counts in a decreasing fashion, highest count first
     static bool sort_pair_in_reverse(const std::pair<int,QString> &a, const std::pair<int,QString> &b);
     static QStringList sortByCounts(const QStringList &folderlst, const QList<int> &countlst);
 
@@ -245,6 +261,34 @@ public:
     // Generate a Unique Id given a root id and Used Set
     static QString GenerateUniqueId(const QString &id, const QSet<QString>& Used);
 
+    // Generate a CRC32 checksum on a file
+    static QString FileCRC32(const QString& filepath);
+
+    // Added to work around macOS specific QMessageBox issues with reactivating proper window upon return
+    static QMessageBox::StandardButton warning(QWidget *parent, const QString &title, const QString &text,
+                                               QMessageBox::StandardButtons buttons = QMessageBox::Ok,
+                                               QMessageBox::StandardButton defaultButton = QMessageBox::NoButton);
+
+    static QMessageBox::StandardButton question(QWidget *parent, const QString &title, const QString &text,
+                                                QMessageBox::StandardButtons buttons = QMessageBox::Yes | QMessageBox::No,
+                                                QMessageBox::StandardButton defaultButton = QMessageBox::NoButton);
+
+    static QMessageBox::StandardButton information(QWidget *parent, const QString &title, const QString &text,
+                                                   QMessageBox::StandardButtons buttons = QMessageBox::Ok,
+                                                   QMessageBox::StandardButton defaultButton = QMessageBox::NoButton);
+
+    static QMessageBox::StandardButton critical(QWidget *parent, const QString &title, const QString &text,
+                                                QMessageBox::StandardButtons buttons = QMessageBox::Ok,
+                                                QMessageBox::StandardButton defaultButton = QMessageBox::NoButton);
+
+    static QString FixupSvgForRendering(const QString& data);
+    static QImage  RenderSvgToImage(const QString& filepath);
+
+    static QString UseNFC(const QString& text);
+
+    static QString CleanFileName(const QString &name);
+
+    static QFileDialog::Options DlgOptions(const QString special_case = QString());
 };
 #endif // UTILITY_H
 

@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2020-2021 Kevin B. Hendricks, Stratford, ON, Canada
+**  Copyright (C) 2020-2025 Kevin B. Hendricks, Stratford, ON, Canada
 **
 **  This file is part of Sigil.
 **
@@ -40,17 +40,18 @@ URLInterceptor::URLInterceptor(QObject *parent)
 void URLInterceptor::interceptRequest(QWebEngineUrlRequestInfo &info)
 {
     // Debug:  output all requests
-    DBG qDebug() << "-----";
-    DBG qDebug() << "method: " << info.requestMethod();
-    DBG qDebug() << "party: " << info.firstPartyUrl();
-    DBG qDebug() << "request" << info.requestUrl();
-    DBG qDebug() << "navtype: " << info.navigationType();
-    DBG qDebug() << "restype: " << info.resourceType();
-    DBG qDebug() << "ActiveWindow: " <<  qApp->activeWindow();
+    DBG qDebug() << "     ";
+    DBG qDebug() << "URLInterceptor";
+    DBG qDebug() << "    method: " << info.requestMethod();
+    DBG qDebug() << "    1st party url: " << info.firstPartyUrl();
+    DBG qDebug() << "    request url: " << info.requestUrl();
+    DBG qDebug() << "    navtype: " << info.navigationType();
+    DBG qDebug() << "    restype: " << info.resourceType();
+    DBG qDebug() << "    ActiveWindow: " <<  qApp->activeWindow();
 
     if (info.requestMethod() != "GET") {
         info.block(true);
-        qDebug() << "Warning: URLInterceptor Blocking POST request from " << info.firstPartyUrl();
+        qDebug() << "    Warning: URLInterceptor Blocking POST request from " << info.firstPartyUrl();
         return;
     }
     
@@ -78,47 +79,60 @@ void URLInterceptor::interceptRequest(QWebEngineUrlRequestInfo &info)
     // verify all url file and sigil schemes before allowing
     // if ((destination.scheme() == "file") || (destination.scheme() == "sigil")) {
     if (destination.scheme() == "file") {
-        // find the relavent MainWindow
+        QString destpath = destination.toLocalFile();
+        
+        // first check for safe destinations inside the users Sigil Preferences folder
+        QString repofolder = Utility::DefinePrefsDir() + "/repo/";
+        if (destpath.startsWith(repofolder)) {
+            info.block(false);
+            return;
+        }
+        QString usercssfolder = Utility::DefinePrefsDir() + "/";
+        // or path must be inside the Sigil user's preferences directory
+        if (destpath.startsWith(usercssfolder)) {
+            info.block(false);
+            return;
+        }
+
+        // find the relevant MainWindow
         QString bookfolder;
         QString mathjaxfolder;
-        QString usercssfolder = Utility::DefinePrefsDir() + "/";
         QString sourcefolder = sourceurl.toLocalFile();
         DBG qDebug() << "sourcefolder: " << sourcefolder;
-        const QWidgetList topwidgets = qApp->topLevelWidgets();
-        foreach(QWidget* widget, topwidgets) {
-            MainWindow * mw = qobject_cast<MainWindow *>(widget);
-            if (mw) {
-                QSharedPointer<Book> book = mw->GetCurrentBook();
-                QString path_to_book = book->GetFolderKeeper()->GetFullPathToMainFolder() + "/";
-                DBG qDebug() << "path_to_book: " << path_to_book;
-                QString path_to_mathjax = mw->GetMathJaxFolder();
-                if (sourcefolder.startsWith(path_to_book)) {
-                    bookfolder = path_to_book;
-                    mathjaxfolder = path_to_mathjax;
-                    DBG qDebug() << "mainwin: " <<  mw;
-                    DBG qDebug() << "book: " << bookfolder;
-                    DBG qDebug() << "mathjax: " << mathjaxfolder;
-                    DBG qDebug() << "usercss: " << usercssfolder;
-                    DBG qDebug() << "party: " << info.firstPartyUrl();
-                    DBG qDebug() << "source: " << sourcefolder;
-                    break;
+        // create a topLevelWidgets equivalent to screen out stale QWidgets more safely
+        const QWidgetList all_widgets = QApplication::allWidgets();
+        foreach(QWidget* w, all_widgets) {
+            if (w && w->isWindow()) {
+                MainWindow * mw = qobject_cast<MainWindow *>(w);
+                if (mw) {
+                    QSharedPointer<Book> book = mw->GetCurrentBook();
+                    if (!book.isNull()) {
+                        QString path_to_book = book->GetFolderKeeper()->GetFullPathToMainFolder() + "/";
+                        // DBG qDebug() << "path_to_book: " << path_to_book;
+                        QString path_to_mathjax = mw->GetMathJaxFolder();
+                        if (sourcefolder.startsWith(path_to_book)) {
+                            bookfolder = path_to_book;
+                            mathjaxfolder = path_to_mathjax;
+                            DBG qDebug() << "        mainwin: " <<  mw;
+                            DBG qDebug() << "        book: " << bookfolder;
+                            DBG qDebug() << "        mathjax: " << mathjaxfolder;
+                            DBG qDebug() << "        usercss: " << usercssfolder;
+                            DBG qDebug() << "        1stparty: " << info.firstPartyUrl();
+                            DBG qDebug() << "        source: " << sourcefolder;
+                            break;
+                        }
+                    }
                 }
             }
         }
         // if can not determine book folder block it
         if (bookfolder.isEmpty()) {
             info.block(true);
-            qDebug() << "Error: URLInterceptor can not determine book folder so all file requests blocked";
+            qDebug() << "Error: URLInterceptor cannot determine book folder so all file requests blocked";
             return;
         }
         // path must be inside of bookfolder, Note it is legal for it not to exist
-        QString destpath = destination.toLocalFile();
         if (destpath.startsWith(bookfolder)) {
-            info.block(false);
-            return;
-        }
-        // or path must be inside the Sigil user's preferences directory
-        if (destpath.startsWith(usercssfolder)) {
             info.block(false);
             return;
         }
@@ -127,14 +141,13 @@ void URLInterceptor::interceptRequest(QWebEngineUrlRequestInfo &info)
             info.block(false);
             return;
         }
-
         // otherwise block it to prevent access to any outside Sigil user file path
         info.block(true);
         qDebug() << "Warning: URLInterceptor blocking access to url " << destination;
         qDebug() << "    from " << info.firstPartyUrl();
         return;
     }
-
+    DBG qDebug() << "URLInterceptor: allow others to proceed";
     // allow others to proceed
     info.block(false);
     return;

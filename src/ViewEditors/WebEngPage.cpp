@@ -1,6 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2019-2025 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2023- Doug Massay
 **
 **  This file is part of Sigil.
 **
@@ -19,20 +20,23 @@
 **
 *************************************************************************/
 #include <QTimer>
-#include <QtWebEngineWidgets/QWebEnginePage>
 #include <QUrl>
 #include <QDebug>
+#include <QWebEngineProfile>
 #include "Misc/Utility.h"
 #include "ViewEditors/WebEngPage.h"
 
 #define DBG if(0)
  
-WebEngPage::WebEngPage(QObject *parent)
-    : QWebEnginePage(parent)
+WebEngPage::WebEngPage(QWebEngineProfile* profile, QObject *parent, bool setbackground)
+    : QWebEnginePage(profile, parent)
 {
-    setBackgroundColor(Utility::WebViewBackgroundColor(true));
+    if (setbackground) {
+        setBackgroundColor(Utility::WebViewBackgroundColor(true));
+    }
     setUrl(QUrl("about:blank"));
 }
+
 
 // Because you can not delegate all links in QtWebEngine we must override here and generate
 // our own link requests
@@ -51,6 +55,7 @@ WebEngPage::WebEngPage(QObject *parent)
 
 bool WebEngPage::acceptNavigationRequest(const QUrl & url, QWebEnginePage::NavigationType type, bool isMainFrame)
 {
+    DBG qDebug() << "    ";
     DBG qDebug() << "acceptNavigationRequest " << url.toString() << " , " << type << " , " << isMainFrame;
     if ((type == QWebEnginePage::NavigationTypeLinkClicked) || (type == QWebEnginePage::NavigationTypeOther)) {
         if (isMainFrame) {
@@ -65,6 +70,15 @@ bool WebEngPage::acceptNavigationRequest(const QUrl & url, QWebEnginePage::Navig
         DBG qDebug() << "acceptNavigationRequest from scheme handler load" << url.toString();
         return true;
     }
+    if (type == QWebEnginePage::NavigationTypeRedirect) {
+        DBG qDebug() << "acceptNavigationRequest from scheme handler redirect" << url.toString();
+        return true;
+    }
+    if (type == QWebEnginePage::NavigationTypeReload) {
+        DBG qDebug() << "acceptNavigationRequest for Reload" << url.toString();
+        return true;
+    }
+
     qDebug() << " Unhandled acceptNavigationRequest with type: " << type;
     return true;
 }

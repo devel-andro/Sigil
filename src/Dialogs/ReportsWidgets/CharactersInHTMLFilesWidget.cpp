@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2021 Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2019-2026 Kevin B. Hendricks, Stratford, Ontario, Canada
 **  Copyright (C) 2012      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012      Dave Heiland
 **
@@ -27,6 +27,8 @@
 #include <QtGui/QFont>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QMessageBox>
+// #include <QFont>
+#include <QDebug>
 
 #include "sigil_constants.h"
 #include "sigil_exception.h"
@@ -51,6 +53,7 @@ CharactersInHTMLFilesWidget::CharactersInHTMLFilesWidget()
 {
     ui.setupUi(this);
     connectSignalsSlots();
+    // ui.Characters->setFont(QFont("Times", 15));
 }
 
 CharactersInHTMLFilesWidget::~CharactersInHTMLFilesWidget()
@@ -92,38 +95,56 @@ void CharactersInHTMLFilesWidget::SetupTable()
 void CharactersInHTMLFilesWidget::AddTableData()
 {
     const QList<HTMLResource *> html_resources = m_Book->GetHTMLResources();
-    QList <QChar> characters = GetDisplayedCharacters(html_resources);
+    QList<uint> characters = GetDisplayedCharacters(html_resources);
     QString all_characters;
-    foreach (QChar c, characters) {
-        all_characters.append(c);
+    foreach (uint unichr, characters) {
+        // if (QChar::isSurrogate(unichr)) {
+        if (unichr >= 0x10000) {
+            QString nonbmpchr = QString::fromUcs4(reinterpret_cast<char32_t*>(&unichr), 1);
+            all_characters += nonbmpchr;
+        } else {
+            all_characters.append(QChar(unichr));
+        }
     }
     ui.Characters->setText(all_characters);
 
-    foreach (QChar c, characters) {
+    foreach (uint unichr, characters) {
         // Write the table entries
         QList<QStandardItem *> rowItems;
         // Character
+        QString chrtxt;
         QStandardItem *item = new QStandardItem();
-        item->setText(QString(c));
+
+        // if (QChar::isSurrogate(unichr)) {
+        if (unichr >= 0x10000) {
+            QString nonbmpchr = QString::fromUcs4(reinterpret_cast<char32_t*>(&unichr), 1);
+            chrtxt += nonbmpchr;
+            
+        } else {
+            chrtxt.append(QChar(unichr));
+        }
+        item->setText(chrtxt);
         rowItems << item;
         // Decimal number
         item = new QStandardItem();
-        ushort char_number = c.unicode();
+        uint char_number = unichr;
         item->setText(QString::number(char_number));
+        item->setTextAlignment(Qt::AlignRight);
         rowItems << item;
         // Hex number
         item = new QStandardItem();
         QString hexadecimal;
         hexadecimal.setNum(char_number,16);
         item->setText(hexadecimal.toUpper());
+        item->setTextAlignment(Qt::AlignRight);
         rowItems << item;
         // Name
         item = new QStandardItem();
-        item->setText(XMLEntities::instance()->GetEntityName(char_number));
+        item->setText(XMLEntities::instance().GetEntityName(char_number));
         rowItems << item;
         // Description
         item = new QStandardItem();
-        item->setText(XMLEntities::instance()->GetEntityDescription(char_number));
+        item->setText(XMLEntities::instance().GetEntityDescription(char_number));
         rowItems << item;
 
         for (int i = 0; i < rowItems.count(); i++) {
@@ -134,28 +155,32 @@ void CharactersInHTMLFilesWidget::AddTableData()
     }
 }
 
-QList <QChar> CharactersInHTMLFilesWidget::GetDisplayedCharacters(QList<HTMLResource *> resources)
+QList <uint> CharactersInHTMLFilesWidget::GetDisplayedCharacters(QList<HTMLResource *> resources)
 {
-    QString all_characters;
+    
+    QSet<uint> character_set;
     foreach (HTMLResource *resource, resources) {
         QString replaced_html = resource->GetText();
         replaced_html = replaced_html.replace("<html>", "<html xmlns=\"http://www.w3.org/1999/xhtml\">");
         QString version = "any_version";
         GumboInterface gi = GumboInterface(replaced_html, version);
         QString text = gi.get_body_text();
-        all_characters.append(text);
-    }
-
-    QMap <QChar, QChar> character_map;
-    foreach (const QChar c, all_characters) {
-        if (c != '\n') {
-            character_map.insert(c, c);
+        for (int i=0; i < text.length(); i++) {
+            QChar c = text.at(i);
+            if (c != '\n') {
+                if (c.isHighSurrogate()) {
+                    if (++i < text.length()) {
+                        QChar d = text.at(i);
+                        character_set.insert(QChar::surrogateToUcs4(c,d));
+                    }
+                    // intentionally skip high surrogate withouts a following character as invalid
+                } else {
+                    character_set.insert(c.unicode());
+                }
+            }
         }
     }
-    QList <QChar> character_list;
-    character_list = character_map.values();
-
-    return character_list;
+    return character_set.values();
 }
 
 
@@ -196,7 +221,7 @@ void CharactersInHTMLFilesWidget::DoubleClick()
 {
     QModelIndex index = ui.fileTree->selectionModel()->selectedRows(0).first();
     QString text = m_ItemModel->itemFromIndex(index)->text();
-    emit FindText(text);
+    emit CharactersInHTMLFilesWidget::FindSpecifiedText(text);
 }
 
 void CharactersInHTMLFilesWidget::Save()
@@ -235,10 +260,7 @@ void CharactersInHTMLFilesWidget::Save()
     QString filter_string = "*.csv;;*.txt;;*.*";
     QString default_filter = "";
     QString save_path = m_LastDirSaved + "/" + m_LastFileSaved;
-    QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions();
 
     QString destination = QFileDialog::getSaveFileName(this,
                                                        tr("Save Report As Comma Separated File"),
@@ -254,7 +276,7 @@ void CharactersInHTMLFilesWidget::Save()
     try {
         Utility::WriteUnicodeTextFile(data, destination);
     } catch (CannotOpenFile&) {
-        QMessageBox::warning(this, tr("Sigil"), tr("Cannot save report file."));
+        Utility::warning(this, tr("Sigil"), tr("Cannot save report file."));
     }
 
     m_LastDirSaved = QFileInfo(destination).absolutePath();

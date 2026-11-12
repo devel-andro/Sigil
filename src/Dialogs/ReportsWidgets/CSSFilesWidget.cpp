@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford, ON
+**  Copyright (C) 2015-2025 Kevin B. Hendricks, Stratford, ON
 **  Copyright (C) 2012      Dave Heiland
 **  Copyright (C) 2012      John Schember <john@nachtimwald.com>
 **
@@ -75,6 +75,7 @@ void CSSFilesWidget::SetupTable(int sort_column, Qt::SortOrder sort_order)
     header.append(tr("Name"));
     header.append(tr("Size (KB)"));
     header.append(tr("Times Used"));
+    header.append(" ");
     m_ItemModel->setHorizontalHeaderLabels(header);
     ui.fileTree->setSelectionBehavior(QAbstractItemView::SelectRows);
     ui.fileTree->setModel(m_ItemModel);
@@ -94,7 +95,7 @@ void CSSFilesWidget::SetupTable(int sort_column, Qt::SortOrder sort_order)
         }
     }
     double total_size = 0;
-    int total_links = 0;
+    // int total_links = 0;
     foreach(CSSResource * css_resource, m_CSSResources) {
         QString filepath = css_resource->GetRelativePath();
         QString path = css_resource->GetFullPath();
@@ -108,23 +109,28 @@ void CSSFilesWidget::SetupTable(int sort_column, Qt::SortOrder sort_order)
         // File Size
         double ffsize = QFile(path).size() / 1024.0;
         total_size += ffsize;
-        QString fsize = QString::number(ffsize, 'f', 2);
+        QString fsize = QLocale().toString(ffsize, 'f', 2);
         NumericItem *size_item = new NumericItem();
         size_item->setText(fsize);
         size_item->setTextAlignment(Qt::AlignRight);
         rowItems << size_item;
         // Times Used
         int count = 0;
-
         if (linked_stylesheets_hash.contains(filepath)) {
             count = linked_stylesheets_hash[filepath];
         }
 
-        total_links += count;
+        // total_links += count;
         NumericItem *link_item = new NumericItem();
         link_item->setText(QString::number(count));
+        link_item->setTextAlignment(Qt::AlignRight);
         rowItems << link_item;
 
+        // empty filler column
+        QStandardItem *filler_item = new QStandardItem();
+        filler_item->setText(" ");
+        rowItems << filler_item;
+        
         for (int i = 0; i < rowItems.count(); i++) {
             rowItems[i]->setEditable(false);
         }
@@ -263,10 +269,7 @@ void CSSFilesWidget::Save()
     QString filter_string = "*.csv;;*.txt;;*.*";
     QString default_filter = "";
     QString save_path = m_LastDirSaved + "/" + m_LastFileSaved;
-    QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions();
 
     QString destination = QFileDialog::getSaveFileName(this,
                                                        tr("Save Report As Comma Separated File"),
@@ -282,7 +285,7 @@ void CSSFilesWidget::Save()
     try {
         Utility::WriteUnicodeTextFile(data, destination);
     } catch (CannotOpenFile&) {
-        QMessageBox::warning(this, tr("Sigil"), tr("Cannot save report file."));
+        Utility::warning(this, tr("Sigil"), tr("Cannot save report file."));
     }
 
     m_LastDirSaved = QFileInfo(destination).absolutePath();

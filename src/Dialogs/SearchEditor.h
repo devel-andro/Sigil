@@ -1,9 +1,9 @@
 /************************************************************************
 **
-**  Copyright (C) 2020 Kevin B. Hendricks, Stratford Ontario Canada
-**  Copyright (C) 2012 John Schember <john@nachtimwald.com>
-**  Copyright (C) 2012 Dave Heiland
-**  Copyright (C) 2012 Grant Drake
+**  Copyright (C) 2022-2026 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2012      John Schember <john@nachtimwald.com>
+**  Copyright (C) 2012      Dave Heiland
+**  Copyright (C) 2012      Grant Drake
 **
 **  This file is part of Sigil.
 **
@@ -28,7 +28,7 @@
 
 #include <QtWidgets/QDialog>
 #include <QtGui/QStandardItemModel>
-#include <QtWidgets/QAction>
+#include <QAction>
 #include <QtWidgets/QMenu>
 #include <QPointer>
 
@@ -75,8 +75,9 @@ signals:
     void ReplaceSelectedSearchRequest();
     void CountAllSelectedSearchRequest();
     void ReplaceAllSelectedSearchRequest();
-
+    void RestartSearch();
     void ShowStatusMessageRequest(const QString &message);
+    void CountsReportCountRequest(SearchEditorModel::searchEntry* entry, int& count);
 
 protected:
     bool eventFilter(QObject *obj, QEvent *ev);
@@ -122,6 +123,8 @@ private slots:
     void SettingsFileModelUpdated();
 
     void ModelItemDropped(const QModelIndex &index);
+
+    void MakeCountsReport();
 
 private:
 
@@ -172,8 +175,6 @@ private:
     QAction *m_CollapseAll;
     QAction *m_ExpandAll;
     QAction *m_FillIn;
-
-    SearchEditorModel *m_SearchEditorModel;
 
     QString m_LastFolderOpen;
 

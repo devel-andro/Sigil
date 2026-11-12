@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2019  Kevin B. Hendricks, Stratford, Ontario, Canada
-**  Copyright (C) 2012  Daniel Pavel <daniel.pavel@gmail.com>
+**  Copyright (C) 2019-2025  Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2012       Daniel Pavel <daniel.pavel@gmail.com>
 **
 **  This file is part of Sigil.
 **
@@ -42,7 +42,9 @@ public:
 
     static bool openFile(const QString &filePath, const QString &application);
 
-    static bool openFileWithXEditor(const QString& filePath, const QString &application, int spinenum = 0);
+    static void clearEditorListForResourceType(const Resource::ResourceType type);
+    
+    static bool openFileWithXEditor(const QString& filePath, const QString &application, int spinenum = 0, int filepos = -1);
 
     static const QStringList editorsForResourceType(const Resource::ResourceType type);
 

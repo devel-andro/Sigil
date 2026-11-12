@@ -1,0 +1,72 @@
+/************************************************************************
+**
+**  Copyright (C) 2023-2026  Kevin B. Hendricks, Stratford, ON, Canada
+**
+**  This file is part of Sigil.
+**
+**  Sigil is free software: you can redistribute it and/or modify
+**  it under the terms of the GNU General Public License as published by
+**  the Free Software Foundation, either version 3 of the License, or
+**  (at your option) any later version.
+**
+**  Sigil is distributed in the hope that it will be useful,
+**  but WITHOUT ANY WARRANTY; without even the implied warranty of
+**  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+**  GNU General Public License for more details.
+**
+**  You should have received a copy of the GNU General Public License
+**  along with Sigil.  If not, see <http://www.gnu.org/licenses/>.
+**
+*************************************************************************/
+
+#pragma once
+#ifndef WEBPROFILEMGR_H
+#define WEBPROFILEMGR_H
+
+#include <QCoreApplication>
+
+/**
+ * Singleton.
+ *
+ * WebProfileMgr
+ */
+
+class URLInterceptor;
+class URLSchemeHandler;
+class QWebEngineProfile;
+
+class WebProfileMgr
+{
+
+public:
+    static WebProfileMgr& instance() {
+        static WebProfileMgr the_instance;
+        return the_instance;
+    }
+
+    WebProfileMgr(const WebProfileMgr&) = delete;
+    WebProfileMgr& operator=(const WebProfileMgr&) = delete;
+
+    QWebEngineProfile* GetPreviewProfile();
+    QWebEngineProfile* GetOneTimeProfile();
+    QWebEngineProfile* GetInspectorProfile();
+    // void FlushDiskCaches();
+    // void CleanUpForExit();
+    
+private:
+
+    WebProfileMgr();
+    ~WebProfileMgr() = default;
+    
+    void InitializeDefaultSettings(QWebEngineSettings* web_settings);
+    URLInterceptor* m_URLint;
+    URLSchemeHandler* m_URLhandler;
+
+    QString m_local_storage_path;
+    QString m_devtools_storage_path;
+    QString m_onetime_storage_path;
+    QWebEngineProfile * m_inspector_profile = nullptr;
+    QWebEngineProfile * m_onetime_profile = nullptr;
+};
+
+#endif // WEBPROFILEMGR_H

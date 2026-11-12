@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2012-2013 John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012-2013 Dave Heiland
 **
@@ -21,14 +21,19 @@
 **
 *************************************************************************/
 
-#include <QtCore/QHashIterator>
-#include <QtCore/QSignalMapper>
-#include <QtGui/QContextMenuEvent>
-#include <QtWidgets/QMessageBox>
-#include <QtWidgets/QPushButton>
+#include <QString>
+#include <QHashIterator>
+#include <QSignalMapper>
+#include <QContextMenuEvent>
+#include <QMessageBox>
+#include <QPushButton>
+#include <QFileDialog>
+#include <QClipboard>
+#include <QApplication>
+#include <QDebug>
 
 #include "Dialogs/SpellcheckEditor.h"
-#include "Misc/CaseInsensitiveItem.h"
+#include "Misc/LocaleAwareItem.h"
 #include "Misc/NumericItem.h"
 #include "Misc/SettingsStore.h"
 #include "Misc/SpellCheck.h"
@@ -36,14 +41,16 @@
 #include "Misc/HTMLSpellCheckML.h"
 #include "Misc/Language.h"
 #include "ResourceObjects/Resource.h"
+#include "sigil_exception.h"
 
 static const QString SETTINGS_GROUP = "spellcheck_editor";
 static const QString SELECTED_DICTIONARY = "selected_dictionary";
 static const QString SHOW_ALL_WORDS = "show_all_words";
-static const QString CASE_INSENSITIVE_SORT = "case_insensitive_sort";
+static const QString LOCALE_AWARE_SORT = "locale_aware_sort";
 static const QString SORT_COLUMN = "sort_column";
 static const QString SORT_ORDER = "sort_order";
 static const QString FILE_EXTENSION = "ini";
+static const QString DEFAULT_REPORT_FILE = "SpellcheckWords.csv";
 
 SpellcheckEditor::SpellcheckEditor(QWidget *parent)
     :
@@ -55,17 +62,22 @@ SpellcheckEditor::SpellcheckEditor(QWidget *parent)
     m_SelectRow(-1),
     m_FilterSC(new QShortcut(QKeySequence(tr("f", "Filter")), this)),
     m_ShowAllSC(new QShortcut(QKeySequence(tr("s", "ShowAllWords")), this)),
-    m_NoCaseSC(new QShortcut(QKeySequence(tr("c", "Case-InsensitiveSort")), this)),
-    m_RefreshSC(new QShortcut(QKeySequence(tr("r", "Refresh")), this))
+    m_AwareSC(new QShortcut(QKeySequence(tr("a", "Locale-AwareSort")), this)),
+    m_RefreshSC(new QShortcut(QKeySequence(tr("r", "Refresh")), this)),
+    m_LastDirSaved(QString()),
+    m_LastFileSaved(QString())
+
 {
     ui.setupUi(this);
+    setWindowFlags(windowFlags() | Qt::WindowMinimizeButtonHint | Qt::WindowMaximizeButtonHint);    
     ui.FilterText->installEventFilter(this);
-
     SetupSpellcheckEditorTree();
     CreateContextMenuActions();
     ConnectSignalsSlots();
     UpdateDictionaries();
     ReadSettings();
+    // first time opening try to select the first row
+    m_SelectRow = 0;
 }
 
 SpellcheckEditor::~SpellcheckEditor()
@@ -118,9 +130,9 @@ void SpellcheckEditor::toggleShowAllWords()
   ui.SpellcheckEditorTree->setFocus();
 }
 
-void SpellcheckEditor::toggleCaseInsensitiveSort()
+void SpellcheckEditor::toggleLocaleAwareSort()
 {
-  ui.CaseInsensitiveSort->click();
+  ui.LocaleAwareSort->click();
   ui.SpellcheckEditorTree->setFocus();
 }
 
@@ -160,9 +172,8 @@ void SpellcheckEditor::Ignore()
 
     m_MultipleSelection = SelectedRowsCount() > 1;
 
-    SpellCheck *sc = SpellCheck::instance();
     foreach (QStandardItem *item, GetSelectedItems()) {
-        sc->ignoreWord(HTMLSpellCheckML::textOf(item->text()));
+        SpellCheck::instance().ignoreWord(HTMLSpellCheckML::textOf(item->text()));
         MarkSpelledOkay(item->row());
     }
 
@@ -188,12 +199,11 @@ void SpellcheckEditor::Add()
 
     m_MultipleSelection = SelectedRowsCount() > 1;
 
-    SpellCheck *sc = SpellCheck::instance();
     SettingsStore settings;
     QStringList enabled_dicts = settings.enabledUserDictionaries();
     bool enabled = false;
     foreach (QStandardItem *item, GetSelectedItems()) {
-        sc->addToUserDictionary(item->text(), dict_name);
+        SpellCheck::instance().addToUserDictionary(item->text(), dict_name);
         if (enabled_dicts.contains(dict_name)) {
             enabled = true;
             MarkSpelledOkay(item->row());
@@ -256,24 +266,20 @@ void SpellcheckEditor::CreateModel(int sort_column, Qt::SortOrder sort_order)
     header.append(tr("Count"));
     header.append(tr("Language"));
     header.append(tr("Misspelled?"));
-    m_SpellcheckEditorModel->setHorizontalHeaderLabels(header);
-    ui.SpellcheckEditorTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
 
     QHash<QString, int> unique_words = m_Book->GetUniqueWordsInHTMLFiles();
 
     int total_misspelled_words = 0;
-    SpellCheck *sc = SpellCheck::instance();
-    Language *lp = Language::instance();
 
     QHashIterator<QString, int> i(unique_words);
     while (i.hasNext()) {
         i.next();
         QString lcword = i.key();
         QString code = HTMLSpellCheckML::langOf(lcword);
-        QString lang = lp->GetLanguageName(code, code);
+        QString lang = Language::instance().GetLanguageName(code, code);
         QString word = HTMLSpellCheckML::textOf(lcword);
         int count = unique_words.value(lcword);
-        bool misspelled = !sc->spell(lcword);
+        bool misspelled = !SpellCheck::instance().spell(lcword);
         if (misspelled) {
             total_misspelled_words++;
         }
@@ -284,13 +290,14 @@ void SpellcheckEditor::CreateModel(int sort_column, Qt::SortOrder sort_order)
 
         QList<QStandardItem *> row_items;
 
-        if (ui.CaseInsensitiveSort->checkState() == Qt::Unchecked) {
-            QStandardItem *word_item = new QStandardItem(word);
+        if (ui.LocaleAwareSort->checkState() == Qt::Unchecked) {
+            QStandardItem *word_item = new QStandardItem();
+            word_item->setText(word);
             word_item->setData(code);
             word_item->setEditable(false);
             row_items << word_item;
         } else {
-            CaseInsensitiveItem *word_item = new CaseInsensitiveItem();
+            LocaleAwareItem *word_item = new LocaleAwareItem();
             word_item->setText(word);
             word_item->setData(code);
             word_item->setEditable(false);
@@ -298,9 +305,12 @@ void SpellcheckEditor::CreateModel(int sort_column, Qt::SortOrder sort_order)
         }
         NumericItem *count_item = new NumericItem();
         count_item->setText(QString::number(count));
+        count_item->setTextAlignment(Qt::AlignRight);
+        count_item->setEditable(false);
         row_items << count_item;
 
         QStandardItem *lang_item = new QStandardItem(lang);
+        lang_item->setEditable(false);
         row_items << lang_item;
 
         QStandardItem *misspelled_item = new QStandardItem();
@@ -320,6 +330,9 @@ void SpellcheckEditor::CreateModel(int sort_column, Qt::SortOrder sort_order)
     ui.SpellcheckEditorTree->resizeColumnToContents(2);
     ui.SpellcheckEditorTree->resizeColumnToContents(3);
 
+    m_SpellcheckEditorModel->setHorizontalHeaderLabels(header);
+    ui.SpellcheckEditorTree->header()->setSectionResizeMode(0, QHeaderView::Stretch);
+
     // Changing the sortIndicator order should not cause the entire wordlist to be regenerated
     // disconnect(ui.SpellcheckEditorTree->header(), SIGNAL(sortIndicatorChanged(int, Qt::SortOrder)), this, SLOT(Sort(int, Qt::SortOrder)));
 
@@ -334,6 +347,7 @@ void SpellcheckEditor::CreateModel(int sort_column, Qt::SortOrder sort_order)
 
 void SpellcheckEditor::Refresh(int sort_column, Qt::SortOrder sort_order)
 {
+    qDebug() << "In Refresh" << sort_column << sort_order;
     QApplication::setOverrideCursor(Qt::WaitCursor);
 
     WriteSettings();
@@ -345,17 +359,16 @@ void SpellcheckEditor::Refresh(int sort_column, Qt::SortOrder sort_order)
     ui.FilterText->setFocus();
     FilterEditTextChangedSlot(ui.FilterText->text());
 
-    SelectRow(m_SelectRow);
     UpdateSuggestions();
-
     QApplication::restoreOverrideCursor();
+    ui.SpellcheckEditorTree->setFocus();
+    SelectRow(m_SelectRow);
 }
 
 void SpellcheckEditor::UpdateDictionaries()
 {
     ui.Dictionaries->clear();
-    SpellCheck *sc = SpellCheck::instance();
-    QStringList dicts = sc->userDictionaries();
+    QStringList dicts = SpellCheck::instance().userDictionaries();
     if (dicts.count() > 0) {
         ui.Dictionaries->addItems(dicts);
     }
@@ -414,9 +427,9 @@ void SpellcheckEditor::SelectRow(int row)
         QStandardItem *child = root_item->child(row, 0);
         if (child) {
             QModelIndex index = child->index();
+            ui.SpellcheckEditorTree->setCurrentIndex(child->index());
             ui.SpellcheckEditorTree->setFocus();
             ui.SpellcheckEditorTree->selectionModel()->select(index, QItemSelectionModel::Select | QItemSelectionModel::Rows);
-            ui.SpellcheckEditorTree->setCurrentIndex(child->index());
         }
     }
 
@@ -428,8 +441,7 @@ void SpellcheckEditor::UpdateSuggestions()
     ui.cbChangeAll->clear();
     QString word = GetSelectedWord();
     if (!word.isEmpty()) {
-        SpellCheck *sc = SpellCheck::instance();
-        ui.cbChangeAll->addItems(sc->suggest(word));
+        ui.cbChangeAll->addItems(SpellCheck::instance().suggest(word));
     }
 }
 
@@ -462,6 +474,7 @@ void SpellcheckEditor::FilterEditTextChangedSlot(const QString &text)
 
 void SpellcheckEditor::Sort(int logicalindex, Qt::SortOrder order)
 {
+    qDebug() << "in Sort: " << logicalindex << order;
     Refresh(logicalindex, order);
 }
 
@@ -503,12 +516,12 @@ void SpellcheckEditor::ReadSettings()
                     this, SLOT(ChangeState(int)));
         }
     }
-    if (settings.contains(CASE_INSENSITIVE_SORT)) {
-        if (settings.value(CASE_INSENSITIVE_SORT).toBool()) {
-            disconnect(ui.CaseInsensitiveSort, SIGNAL(stateChanged(int)),
+    if (settings.contains(LOCALE_AWARE_SORT)) {
+        if (settings.value(LOCALE_AWARE_SORT).toBool()) {
+            disconnect(ui.LocaleAwareSort, SIGNAL(stateChanged(int)),
                        this, SLOT(ChangeState(int)));
-            ui.CaseInsensitiveSort->setCheckState(Qt::Checked);
-            connect(ui.CaseInsensitiveSort, SIGNAL(stateChanged(int)),
+            ui.LocaleAwareSort->setCheckState(Qt::Checked);
+            connect(ui.LocaleAwareSort, SIGNAL(stateChanged(int)),
                     this, SLOT(ChangeState(int)));
         }
     }
@@ -531,6 +544,12 @@ void SpellcheckEditor::ReadSettings()
         // connect(ui.SpellcheckEditorTree->header(), SIGNAL(sortIndicatorChanged(int, Qt::SortOrder)), this, SLOT(Sort(int, Qt::SortOrder)));
     }
 
+    // Last file open
+    m_LastDirSaved = settings.value("last_dir_saved").toString();
+    m_LastFileSaved = settings.value("last_file_saved_spellcheckeditor").toString();
+    if (m_LastFileSaved.isEmpty()) {
+        m_LastFileSaved = DEFAULT_REPORT_FILE;
+    }
     settings.endGroup();
 }
 
@@ -546,10 +565,11 @@ void SpellcheckEditor::WriteSettings()
 
     // Checkboxes
     settings.setValue(SHOW_ALL_WORDS, ui.ShowAllWords->checkState() == Qt::Checked);
-    settings.setValue(CASE_INSENSITIVE_SORT, ui.CaseInsensitiveSort->checkState() == Qt::Checked);
+    settings.setValue(LOCALE_AWARE_SORT, ui.LocaleAwareSort->checkState() == Qt::Checked);
     settings.setValue(SORT_COLUMN, ui.SpellcheckEditorTree->header()->sortIndicatorSection());
     settings.setValue(SORT_ORDER, ui.SpellcheckEditorTree->header()->sortIndicatorOrder() == Qt::AscendingOrder);
-
+    settings.setValue("last_dir_saved", m_LastDirSaved);
+    settings.setValue("last_file_saved_spellcheckeditor", m_LastFileSaved);
     settings.endGroup();
 }
 
@@ -559,13 +579,18 @@ void SpellcheckEditor::CreateContextMenuActions()
     m_Add       = new QAction(tr("Add to Dictionary"), this);
     m_Find      = new QAction(tr("Find in Text"),      this);
     m_SelectAll = new QAction(tr("Select All"),        this);
+    m_SaveSelected = new QAction(tr("Save Selected Data") + "...", this);
+    m_CopySelected = new QAction(tr("Copy Selected Data to Clipboard") + "...", this);
     m_Ignore->setShortcut(QKeySequence(Qt::Key_F1));
     m_Add->setShortcut(QKeySequence(Qt::Key_F2));
     m_Find->setShortcut(QKeySequence(Qt::Key_F3));
+    m_CopySelected->setShortcut(QKeySequence::Copy);                   
     // Has to be added to the dialog itself for the keyboard shortcut to work.
     addAction(m_Ignore);
     addAction(m_Add);
     addAction(m_Find);
+    addAction(m_SaveSelected);
+    addAction(m_CopySelected);
 }
 
 void SpellcheckEditor::OpenContextMenu(const QPoint &point)
@@ -579,6 +604,8 @@ void SpellcheckEditor::OpenContextMenu(const QPoint &point)
         m_Add->setEnabled(true);
         m_Find->setEnabled(true);
         m_SelectAll->setEnabled(true);
+        m_SaveSelected->setEnabled(ui.SpellcheckEditorTree->selectionModel()->selectedRows().count() > 0);
+        m_CopySelected->setEnabled(ui.SpellcheckEditorTree->selectionModel()->selectedRows().count() > 0);
     }
 }
 
@@ -593,12 +620,125 @@ void SpellcheckEditor::SetupContextMenu(const QPoint &point)
     m_Find->setEnabled(selected_rows_count > 0);
     m_ContextMenu->addSeparator();
     m_ContextMenu->addAction(m_SelectAll);
+    m_Find->setEnabled(selected_rows_count > 0);
+    m_ContextMenu->addAction(m_SaveSelected);
+    m_SaveSelected->setEnabled(ui.SpellcheckEditorTree->selectionModel()->selectedRows().count() > 0);
+    m_ContextMenu->addAction(m_CopySelected);
+    m_CopySelected->setEnabled(ui.SpellcheckEditorTree->selectionModel()->selectedRows().count() > 0);
 }
+
+void SpellcheckEditor::Save()
+{
+    QModelIndexList selected_indexes = ui.SpellcheckEditorTree->selectionModel()->selectedRows(0);
+    if (selected_indexes.count() == 0) return;
+    // sort the selection to ensure correct row/column order
+    std::sort(selected_indexes.begin(), selected_indexes.end());
+
+    QStringList report_info;
+    QStringList heading_row;
+
+    // Get headings
+    for (int col = 0; col < ui.SpellcheckEditorTree->header()->count(); col++) {
+        QStandardItem *item = m_SpellcheckEditorModel->horizontalHeaderItem(col);
+        QString text = "";
+        if (item) {
+            text = item->text();
+        }
+        heading_row << text;
+    }
+    report_info << Utility::createCSVLine(heading_row);
+
+    // Get selected data from table
+    foreach(QModelIndex index, selected_indexes) {
+        int row = index.row();
+        QStringList data_row;
+        for (int col = 0; col < ui.SpellcheckEditorTree->header()->count(); col++) {
+            QStandardItem *item = m_SpellcheckEditorModel->item(row, col);
+            QString text = "";
+            if (item) {
+                text = item->text();
+            }
+            data_row << text;
+        }
+        report_info << Utility::createCSVLine(data_row);
+    }
+    QString data = report_info.join('\n') + '\n';
+
+    // Save the file
+    ReadSettings();
+    QString filter_string = "*.csv;;*.txt;;*.*";
+    QString default_filter = "";
+    QString save_path = m_LastDirSaved + "/" + m_LastFileSaved;
+    QFileDialog::Options options = Utility::DlgOptions();
+
+    QString destination = QFileDialog::getSaveFileName(this,
+                                                       tr("Save Selected Data As Comma Separated File"),
+                                                       save_path,
+                                                       filter_string,
+                                                       &default_filter,
+                                                       options);
+
+    if (destination.isEmpty()) {
+        return;
+    }
+
+    try {
+        Utility::WriteUnicodeTextFile(data, destination);
+    } catch (CannotOpenFile&) {
+        Utility::warning(this, tr("Sigil"), tr("Cannot save data file."));
+    }
+
+    m_LastDirSaved = QFileInfo(destination).absolutePath();
+    m_LastFileSaved = QFileInfo(destination).fileName();
+    WriteSettings();
+}
+
 
 void SpellcheckEditor::ForceClose()
 {
     close();
 }
+
+void SpellcheckEditor::CopySelected()
+{
+    QModelIndexList selected_indexes = ui.SpellcheckEditorTree->selectionModel()->selectedRows(0);
+    if (selected_indexes.count() == 0) return;
+    // sort the selection to ensure correct row/column order
+    std::sort(selected_indexes.begin(), selected_indexes.end());
+
+    QStringList report_info;
+    QStringList heading_row;
+    QStringList data;
+
+    // Get headings
+    for (int col = 0; col < ui.SpellcheckEditorTree->header()->count(); col++) {
+        QStandardItem *item = m_SpellcheckEditorModel->horizontalHeaderItem(col);
+        QString text = "";
+        if (item) {
+            text = item->text();
+        }
+        heading_row << text;
+    }
+    data << heading_row.join('\t');
+    
+    // Get selected data from table
+    foreach(QModelIndex index, selected_indexes) {
+        int row = index.row();
+        QStringList data_row;
+        for (int col = 0; col < ui.SpellcheckEditorTree->header()->count(); col++) {
+            QStandardItem *item = m_SpellcheckEditorModel->item(row, col);
+            QString text = "";
+            if (item) {
+                text = item->text();
+            }
+            data_row << text;
+        }
+        data << data_row.join('\t');
+    }
+    QString cliptext  = data.join('\n') + '\n';
+    QApplication::clipboard()->setText(cliptext);
+}
+
 
 void SpellcheckEditor::ConnectSignalsSlots()
 {
@@ -622,18 +762,18 @@ void SpellcheckEditor::ConnectSignalsSlots()
     connect(m_Add,       SIGNAL(triggered()), this, SLOT(Add()));
     connect(m_Find,      SIGNAL(triggered()), this, SLOT(FindSelectedWord()));
     connect(m_SelectAll, SIGNAL(triggered()), this, SLOT(SelectAll()));
+    connect(m_SaveSelected, SIGNAL(triggered()), this, SLOT(Save()));
+    connect(m_CopySelected, SIGNAL(triggered()), this, SLOT(CopySelected()));
     connect(ui.SpellcheckEditorTree, SIGNAL(doubleClicked(const QModelIndex &)),
             this,         SLOT(FindSelectedWord()));
     connect(ui.ShowAllWords,  SIGNAL(stateChanged(int)),
             this,               SLOT(ChangeState(int)));
-    connect(ui.CaseInsensitiveSort,  SIGNAL(stateChanged(int)),
+    connect(ui.LocaleAwareSort,  SIGNAL(stateChanged(int)),
             this,               SLOT(ChangeState(int)));
-    connect(ui.Dictionaries, SIGNAL(activated(const QString &)),
+    connect(ui.Dictionaries, SIGNAL(textActivated(const QString &)),
             this,            SLOT(DictionaryChanged(const QString &)));
-
     connect(m_FilterSC, SIGNAL(activated()), ui.FilterText, SLOT(setFocus()));
     connect(m_ShowAllSC, SIGNAL(activated()), this, SLOT(toggleShowAllWords()));
-    connect(m_NoCaseSC, SIGNAL(activated()), this, SLOT(toggleCaseInsensitiveSort()));
+    connect(m_AwareSC, SIGNAL(activated()), this, SLOT(toggleLocaleAwareSort()));
     connect(m_RefreshSC, SIGNAL(activated()), this, SLOT(Refresh()));
-
 }

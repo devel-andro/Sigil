@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -22,31 +22,35 @@
 
 #include <QApplication>
 #include <QGuiApplication>
-#include <QtCore/QDateTime>
-#include <QtCore/QFile>
-#include <QtCore/QFileInfo>
-#include <QtCore/QLocale>
-#include <QtCore/QSignalMapper>
-#include <QtCore/QString>
-#include <QtCore/QUrl>
-#include <QtGui/QClipboard>
-#include <QtWidgets/QLayout>
-#include <QtWidgets/QMenu>
-#include <QtWebEngineWidgets/QWebEngineView>
-#include <QtWebEngineWidgets/QWebEngineProfile>
-#include <QtPrintSupport/QPrinter>
-#include <QtPrintSupport/QPrintDialog>
-#include <QtPrintSupport/QPrintPreviewDialog>
+#include <QDateTime>
+#include <QFile>
+#include <QFileInfo>
+#include <QLocale>
+#include <QSignalMapper>
+#include <QString>
+#include <QUrl>
+#include <QClipboard>
+#include <QLayout>
+#include <QMenu>
+#include <QVariant>
+#include <QEvent>
+#include <QKeyEvent>
 #include <QDebug>
 
 #include "MainUI/MainWindow.h"
 #include "ViewEditors/SimplePage.h"
 #include "Misc/OpenExternally.h"
 #include "Misc/SettingsStore.h"
+#include "Misc/WebProfileMgr.h"
 #include "Misc/Utility.h"
+#include "Misc/webviewprinter.h"
 #include "ResourceObjects/ImageResource.h"
 #include "sigil_constants.h"
+#include "Widgets/AdjustImage.h"
 #include "Tabs/ImageTab.h"
+
+#include <QMetaType>
+static const QVariant QVINVALID = QVariant(QMetaType(QMetaType::UnknownType));
 
 const QString IMAGE_HTML_BASE =
     "<html>"
@@ -59,26 +63,28 @@ const QString IMAGE_HTML_BASE =
     "</style>"
     "</head>"
     "<body>"
-    "<p><img src=\"%1\" /></p>"
-    "<hr />"
     "<div>%2&times;%3px | %4 KB | %5%6</div>"
+    "<hr />"
+    "<p><img src=\"%1\" /></p>"
     "</body>"
     "</html>";
-
 
 ImageTab::ImageTab(ImageResource *resource, QWidget *parent)
     :
     ContentTab(resource, parent),
-    m_WebView(new QWebEngineView(this)),
+    m_AdjImg(nullptr),
     m_ContextMenu(new QMenu(this)),
     m_OpenWithContextMenu(new QMenu(this)),
-    m_openWithMapper(new QSignalMapper(this))
+    m_openWithMapper(new QSignalMapper(this)),
+    m_WebViewPrinter(new WebViewPrinter(this))
 {
-    m_WebView->setPage(new SimplePage(m_WebView));
-    m_WebView->setContextMenuPolicy(Qt::CustomContextMenu);
-    m_WebView->setFocusPolicy(Qt::NoFocus);
-    m_WebView->setAcceptDrops(false);
-    m_Layout->addWidget(m_WebView);
+    const QString path = m_Resource->GetFullPath();
+    const QString mediatype = m_Resource->GetMediaType();
+    m_AdjImg = new AdjustImage(path, mediatype, this);
+    m_AdjImg->setContextMenuPolicy(Qt::CustomContextMenu);
+    m_Layout->setContentsMargins(2,2,2,2);
+    m_Layout->addWidget(m_AdjImg);
+    setFocusPolicy(Qt::StrongFocus);
     // Set the Zoom factor but be sure no signals are set because of this.
     SettingsStore settings;
     m_CurrentZoomFactor = settings.zoomImage();
@@ -90,66 +96,46 @@ ImageTab::ImageTab(ImageResource *resource, QWidget *parent)
 
 ImageTab::~ImageTab()
 {
-    if (m_WebView) {
-        delete m_WebView;
-        m_WebView = 0;
-    }
-
-    if (m_ContextMenu) {
-        delete m_ContextMenu;
-        m_ContextMenu = 0;
-    }
-
-    if (m_OpenWithContextMenu) {
-        delete m_OpenWithContextMenu;
-        m_OpenWithContextMenu = 0;
-    }
-
-    if (m_OpenWith) {
-        delete m_OpenWith;
-        m_OpenWith = 0;
-    }
-
-    if (m_OpenWithEditor0) {
-        delete m_OpenWithEditor0;
-        m_OpenWithEditor0 = NULL;
-    }
-
-    if (m_OpenWithEditor1) {
-        delete m_OpenWithEditor1;
-        m_OpenWithEditor1 = NULL;
-    }
-
-    if (m_OpenWithEditor2) {
-        delete m_OpenWithEditor2;
-        m_OpenWithEditor2 = NULL;
-    }
-
-    if (m_OpenWithEditor3) {
-        delete m_OpenWithEditor3;
-        m_OpenWithEditor3 = NULL;
-    }
-
-    if (m_OpenWithEditor4) {
-        delete m_OpenWithEditor4;
-        m_OpenWithEditor4 = NULL;
-    }
-
-    if (m_SaveAs) {
-        delete m_SaveAs;
-        m_SaveAs = 0;
-    }
-
-    if (m_CopyImage) {
-        delete m_CopyImage;
-        m_CopyImage = 0;
-    }
+    delete m_ContextMenu;
+    delete m_OpenWithContextMenu;
+    delete m_OpenWith;
+    delete m_OpenWithEditor0;
+    delete m_OpenWithEditor1;
+    delete m_OpenWithEditor2;
+    delete m_OpenWithEditor3;
+    delete m_OpenWithEditor4;
+    delete m_SaveAs;
+    delete m_CopyImage;
+    delete m_SaveChanges;
+    delete m_ZoomIn;
+    delete m_ZoomOut;
+    delete m_ZoomToFit;
+    delete m_Undo;
+    delete m_Redo;
+    delete m_RotateLeft;
+    delete m_RotateRight;
+    delete m_CropImage;
+    delete m_ResizeImage;
 }
 
+// map context menu actions into AdjustImage routines
+void ImageTab::SaveChanges() { m_AdjImg->doSave(); }
+void ImageTab::ZoomIn()      { m_AdjImg->doZoomIn();      }
+void ImageTab::ZoomOut()     { m_AdjImg->doZoomOut();     }
+void ImageTab::ZoomToFit()   { m_AdjImg->doZoomToFit();   }
+void ImageTab::Undo()        { m_AdjImg->doUndo();        }
+void ImageTab::Redo()        { m_AdjImg->doRedo();        }
+void ImageTab::RotateLeft()  { m_AdjImg->doRotateLeft();  }
+void ImageTab::RotateRight() { m_AdjImg->doRotateRight(); }
+void ImageTab::CropImage()   { m_AdjImg->doCrop();        }
+void ImageTab::ResizeImage() { m_AdjImg->doResizeImage(); }
+void ImageTab::ReloadImageFromDisk() { m_AdjImg->doReloadImageFromDisk(); }
 
 float ImageTab::GetZoomFactor() const
 {
-    return m_CurrentZoomFactor;
+    float zf = (float) m_AdjImg->getZoomFactor();
+    return zf;
+    // return m_CurrentZoomFactor();
 }
 
 void ImageTab::SetZoomFactor(float new_zoom_factor)
@@ -162,6 +148,11 @@ void ImageTab::SetZoomFactor(float new_zoom_factor)
     emit ZoomFactorChanged(m_CurrentZoomFactor);
 }
 
+void ImageTab::HandleInternalImageZoomChange(double factor)
+{
+    float zf = (float) factor;
+    SetZoomFactor(zf);
+}
 
 void ImageTab::UpdateDisplay()
 {
@@ -174,33 +165,21 @@ void ImageTab::UpdateDisplay()
     }
 }
 
+void ImageTab::ThemeChangeRefresh()
+{
+    RefreshContent();
+}
+
 void ImageTab::RefreshContent()
 {
-    m_WebView->page()->profile()->clearHttpCache();
     const QString path = m_Resource->GetFullPath();
-    const QFileInfo fileInfo = QFileInfo(path);
-    const double ffsize = fileInfo.size() / 1024.0;
-    const QString fsize = QLocale().toString(ffsize, 'f', 2);
-    const QImage img(path);
-    const QUrl imgUrl = QUrl::fromLocalFile(path);
-    QString colors_shades = img.isGrayscale() ? tr("shades") : tr("colors");
-    QString grayscale_color = img.isGrayscale() ? tr("Grayscale") : tr("Color");
-    QString colorsInfo = "";
-
-    if (img.depth() == 32) {
-        colorsInfo = QString(" %1bpp").arg(img.bitPlaneCount());
-    } else if (img.depth() > 0) {
-        colorsInfo = QString(" %1bpp (%2 %3)").arg(img.bitPlaneCount()).arg(img.colorCount()).arg(colors_shades);
+    const QString mediatype = m_Resource->GetMediaType();
+    if (!m_AdjImg) {
+        m_AdjImg = new AdjustImage(path, mediatype, this);
     }
-
-    QString html = IMAGE_HTML_BASE.arg(imgUrl.toString()).arg(img.width()).arg(img.height()).arg(fsize)
-                         .arg(grayscale_color).arg(colorsInfo);
-
-    if (Utility::IsDarkMode()) {
-        html = Utility::AddDarkCSS(html);
-    }
-    m_WebView->page()->setBackgroundColor(Utility::WebViewBackgroundColor());
-    m_WebView->setHtml(html, imgUrl);
+    m_filepath = path;
+    m_AdjImg->hide();
+    m_AdjImg->show();
 }
 
 void ImageTab::saveAs()
@@ -286,7 +265,7 @@ void ImageTab::OpenContextMenu(const QPoint &point)
 
 bool ImageTab::SuccessfullySetupContextMenu(const QPoint &point)
 {
-    QUrl imageUrl("file:///" % m_Resource->GetFullPath());
+    QUrl imageUrl = QUrl::fromLocalFile(m_Resource->GetFullPath());
 
     if (imageUrl.isValid() && imageUrl.isLocalFile()) {
         // Open With
@@ -301,11 +280,11 @@ bool ImageTab::SuccessfullySetupContextMenu(const QPoint &point)
         QStringList editor_names = OpenExternally::editorDescriptionsForResourceType(imageType);
 
         if (editors.isEmpty()) {
-            m_OpenWithEditor0->setData(QVariant::Invalid);
-            m_OpenWithEditor1->setData(QVariant::Invalid);
-            m_OpenWithEditor2->setData(QVariant::Invalid);
-            m_OpenWithEditor3->setData(QVariant::Invalid);
-            m_OpenWithEditor4->setData(QVariant::Invalid);
+            m_OpenWithEditor0->setData(QVINVALID);
+            m_OpenWithEditor1->setData(QVINVALID);
+            m_OpenWithEditor2->setData(QVINVALID);
+            m_OpenWithEditor3->setData(QVINVALID);
+            m_OpenWithEditor4->setData(QVINVALID);
             m_OpenWith->setText(tr("Open With") + "...");
             m_OpenWith->setData(imageUrl);
             m_ContextMenu->addAction(m_OpenWith);
@@ -319,7 +298,7 @@ bool ImageTab::SuccessfullySetupContextMenu(const QPoint &point)
                 if (k==3) oeaction = m_OpenWithEditor3;
                 if (k==4) oeaction = m_OpenWithEditor4;
                 if (oeaction) {
-                    oeaction->setData(QVariant::Invalid);
+                    oeaction->setData(QVINVALID);
                     oeaction->setText("");
                     oeaction->setEnabled(false);
                     oeaction->setVisible(false);
@@ -347,11 +326,32 @@ bool ImageTab::SuccessfullySetupContextMenu(const QPoint &point)
             m_ContextMenu->addMenu(m_OpenWithContextMenu);
         }
 
+        // handle conditional menu items
+        m_CropImage->setEnabled(m_AdjImg->isCropEnabled());
+        m_Undo->setEnabled(m_AdjImg->isUndoEnabled());
+        m_Redo->setEnabled(m_AdjImg->isRedoEnabled());
+
         // Save As
         m_SaveAs->setData(imageUrl);
         m_ContextMenu->addAction(m_SaveAs);
-        m_ContextMenu->addSeparator();
         m_ContextMenu->addAction(m_CopyImage);
+        m_ContextMenu->addSeparator();
+        m_ContextMenu->addAction(m_SaveChanges);
+        m_ContextMenu->addSeparator();
+        m_ContextMenu->addAction(m_ZoomIn);
+        m_ContextMenu->addAction(m_ZoomOut);
+        m_ContextMenu->addAction(m_ZoomToFit);
+        m_ContextMenu->addSeparator();
+        m_ContextMenu->addAction(m_Undo);
+        m_ContextMenu->addAction(m_Redo);
+        m_ContextMenu->addSeparator();
+        m_ContextMenu->addAction(m_RotateLeft);
+        m_ContextMenu->addAction(m_RotateRight);
+        m_ContextMenu->addSeparator();
+        m_ContextMenu->addAction(m_CropImage);
+        m_ContextMenu->addAction(m_ResizeImage);
+        m_ContextMenu->addSeparator();
+        m_ContextMenu->addAction(m_ReloadImageFromDisk);
     }
 
     return true;
@@ -365,8 +365,6 @@ void ImageTab::CreateContextMenuActions()
     m_OpenWithEditor3 = new QAction("", this);
     m_OpenWithEditor4 = new QAction("", this);
     m_OpenWith        = new QAction(tr("Open With") + "...",  this);
-    m_SaveAs          = new QAction(tr("Save As") + "...",  this);
-    m_CopyImage       = new QAction(tr("Copy Image"),  this);
     m_OpenWithContextMenu->setTitle(tr("Open With"));
     m_OpenWithContextMenu->addAction(m_OpenWithEditor0);
     m_OpenWithContextMenu->addAction(m_OpenWithEditor1);
@@ -374,6 +372,151 @@ void ImageTab::CreateContextMenuActions()
     m_OpenWithContextMenu->addAction(m_OpenWithEditor3);
     m_OpenWithContextMenu->addAction(m_OpenWithEditor4);
     m_OpenWithContextMenu->addAction(m_OpenWith);
+    m_SaveAs          = new QAction(tr("Save As") + "...",  this);
+    m_CopyImage       = new QAction(tr("Copy Image"),  this);
+    
+    m_SaveChanges     = new QAction(tr("Save Changes"), this);
+    m_ZoomIn          = new QAction(tr("Zoom In"),      this);
+    m_ZoomOut         = new QAction(tr("Zoom Out"),     this);
+    m_ZoomToFit       = new QAction(tr("Zoom to Fit"),  this);
+    m_Undo            = new QAction(tr("Undo Change"),  this);
+    m_Redo            = new QAction(tr("Redo Change"),  this);
+    m_RotateLeft      = new QAction(tr("Rotate Left"),  this);
+    m_RotateRight     = new QAction(tr("Rotate Right"), this);
+    m_CropImage       = new QAction(tr("Crop Image"),   this);
+    m_ResizeImage     = new QAction(tr("Resize Image"), this);
+    m_ReloadImageFromDisk = new QAction(tr("Reload Image From Disk"), this);
+}
+
+
+bool ImageTab::event(QEvent *event) {
+    // Intercept the override event before the QMainWindow sees it
+    if (event->type() == QEvent::ShortcutOverride) {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+        qDebug() << "event: " << keyEvent->key() << keyEvent->modifiers() << keyEvent->text();
+        if (keyEvent->modifiers() == Qt::ControlModifier) {
+            if (keyEvent->key() == Qt::Key_S) {
+                event->accept();
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_Y) {
+                event->accept();
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_Z) {
+                event->accept();
+                return true;
+            }
+            if ((keyEvent->key() == Qt::Key_Plus) || (keyEvent->key() == Qt::Key_Equal)) {
+                event->accept();
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_Minus) {
+                event->accept();
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_R) {
+                event->accept();
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_L) {
+                event->accept();
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_K) {
+                event->accept();
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_E) {
+                event->accept();
+                return true;
+            }
+            if (keyEvent->key() == Qt::Key_F) {
+                event->accept();
+                return true;
+            }
+        } else if (keyEvent->modifiers() == (Qt::ControlModifier | Qt::ShiftModifier)) {
+            if ((keyEvent->key() == Qt::Key_Plus) || (keyEvent->key() == Qt::Key_Equal)) {
+                event->accept();
+                return true;
+            }
+        }
+    }
+    return ContentTab::event(event);
+}
+
+
+void ImageTab::keyPressEvent(QKeyEvent *event)
+{
+    if (event->modifiers() == Qt::ControlModifier) {
+        if (event->key() == Qt::Key_S) {
+            m_SaveChanges->trigger();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Y) {
+            if (m_AdjImg && m_AdjImg->isRedoEnabled()) {
+                m_Redo->trigger();
+            }
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Z) {
+            if (m_AdjImg && m_AdjImg->isUndoEnabled()) {
+                m_Undo->trigger();
+            }
+            event->accept();
+            return;
+        }
+        if ((event->key() == Qt::Key_Plus) || (event->key() == Qt::Key_Equal)) {
+            m_ZoomIn->trigger();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_Minus) {
+            m_ZoomOut->trigger();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_R) {
+            m_RotateRight->trigger();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_L) {
+            m_RotateLeft->trigger();
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_K) {
+            if (m_AdjImg && m_AdjImg->isCropEnabled()) {
+                m_CropImage->trigger();
+            }
+            event->accept();
+            return;
+        }
+        if (event->key() == Qt::Key_E) {
+            m_ResizeImage->trigger();
+            event->accept();
+        }
+        if (event->key() == Qt::Key_F) {
+            m_ZoomToFit->trigger();
+            event->accept();
+            return;
+        }
+    } else if (event->modifiers() == (Qt::ControlModifier | Qt::ShiftModifier)) {
+        if ((event->key() == Qt::Key_Plus) || (event->key() == Qt::Key_Equal)) {
+            m_ZoomIn->trigger();
+            event->accept();
+            return;
+        }
+    }
+    ContentTab::keyPressEvent(event);
+}
+
+void ImageTab::EmitImageContentChanged()
+{
+    emit ImageContentChanged(m_Resource);
 }
 
 void ImageTab::ConnectSignalsToSlots()
@@ -381,7 +524,9 @@ void ImageTab::ConnectSignalsToSlots()
     connect(m_Resource, SIGNAL(ResourceUpdatedOnDisk()),   this, SLOT(RefreshContent()));
     connect(m_Resource, SIGNAL(Deleted(const Resource *)), this, SLOT(Close()));
 
-    connect(m_WebView, SIGNAL(customContextMenuRequested(const QPoint &)),  this, SLOT(OpenContextMenu(const QPoint &)));
+    connect(m_AdjImg, SIGNAL(customContextMenuRequested(const QPoint &)),this, SLOT(OpenContextMenu(const QPoint &)));
+    connect(m_AdjImg, SIGNAL(InternalZoomFactorChanged(double)),  this, SLOT(HandleInternalImageZoomChange(double)));
+    connect(m_AdjImg, SIGNAL(SetImageContentModified()), this, SLOT(EmitImageContentChanged()));
 
     connect(m_OpenWith,       SIGNAL(triggered()),   this, SLOT(openWith()));
     connect(m_OpenWithEditor0, SIGNAL(triggered()),  m_openWithMapper, SLOT(map()));
@@ -399,31 +544,61 @@ void ImageTab::ConnectSignalsToSlots()
     connect(m_OpenWithEditor4, SIGNAL(triggered()),  m_openWithMapper, SLOT(map()));
     m_openWithMapper->setMapping(m_OpenWithEditor4, 4);
 
-    connect(m_openWithMapper, SIGNAL(mapped(int)),   this, SLOT(openWithEditor(int)));
-    connect(m_SaveAs,         SIGNAL(triggered()),   this, SLOT(saveAs()));
-    connect(m_CopyImage,      SIGNAL(triggered()),   this, SLOT(copyImage()));
+    connect(m_openWithMapper, SIGNAL(mappedInt(int)), this, SLOT(openWithEditor(int)));
+    connect(m_SaveAs,         SIGNAL(triggered()),    this, SLOT(saveAs()));
+    connect(m_CopyImage,      SIGNAL(triggered()),    this, SLOT(copyImage()));
+    connect(m_SaveChanges,    SIGNAL(triggered()),    this, SLOT(SaveChanges()));
+    connect(m_ZoomIn,         SIGNAL(triggered()),    this, SLOT(ZoomIn()));
+    connect(m_ZoomOut,        SIGNAL(triggered()),    this, SLOT(ZoomOut()));
+    connect(m_ZoomToFit,      SIGNAL(triggered()),    this, SLOT(ZoomToFit()));
+    connect(m_Undo,           SIGNAL(triggered()),    this, SLOT(Undo()));
+    connect(m_Redo,           SIGNAL(triggered()),    this, SLOT(Redo()));
+    connect(m_RotateLeft,     SIGNAL(triggered()),    this, SLOT(RotateLeft()));
+    connect(m_RotateRight,    SIGNAL(triggered()),    this, SLOT(RotateRight()));
+    connect(m_CropImage,      SIGNAL(triggered()),    this, SLOT(CropImage()));
+    connect(m_ResizeImage,    SIGNAL(triggered()),    this, SLOT(ResizeImage()));
+    connect(m_ReloadImageFromDisk,    SIGNAL(triggered()),    this, SLOT(ReloadImageFromDisk()));
 }
 
 void ImageTab::Zoom()
 {
-    m_WebView->setZoomFactor(m_CurrentZoomFactor);
+    m_AdjImg->scaleImageUsing(m_CurrentZoomFactor);
+}
+
+QString ImageTab::PageSourceForPrinting(QString& file_path)
+{
+    const QString path = m_Resource->GetFullPath();
+    const QString folderpath = m_Resource->GetFullFolderPath();
+    const QFileInfo fileInfo = QFileInfo(path);
+    const double ffsize = fileInfo.size() / 1024.0;
+    const QString fsize = QLocale().toString(ffsize, 'f', 2);
+    const QImage img(path);
+    const QUrl imgUrl = QUrl::fromLocalFile(path);
+    QString colors_shades = img.isGrayscale() ? tr("shades") : tr("colors");
+    QString grayscale_color = img.isGrayscale() ? tr("Grayscale") : tr("Color");
+    QString colorsInfo = "";
+    if (img.depth() == 32) {
+        colorsInfo = QString(" %1bpp").arg(img.bitPlaneCount());
+    } else if (img.depth() > 0) {
+        colorsInfo = QString(" %1bpp (%2 %3)").arg(img.bitPlaneCount()).arg(img.colorCount()).arg(colors_shades);
+    }
+
+    QString html = IMAGE_HTML_BASE.arg(imgUrl.toString()).arg(img.width()).arg(img.height()).arg(fsize)
+                         .arg(grayscale_color).arg(colorsInfo);
+    file_path = folderpath + "/temp.xhtml";
+    return html;
 }
 
 void ImageTab::PrintPreview()
 {
-    QPrintPreviewDialog *print_preview = new QPrintPreviewDialog(this);
-    connect(print_preview, SIGNAL(paintRequested(QPrinter *)), m_WebView, SLOT(print(QPrinter *)));
-    print_preview->exec();
-    print_preview->deleteLater();
+    QString file_path;
+    QString page_source = PageSourceForPrinting(file_path);
+    m_WebViewPrinter->setContent(file_path, page_source, false);
 }
 
 void ImageTab::Print()
 {
-    QPrinter printer;
-    QPrintDialog print_dialog(&printer, this);
-    print_dialog.setWindowTitle(tr("Print %1").arg(GetFilename()));
-
-    if (print_dialog.exec() == QDialog::Accepted) {
-        // m_WebView->print(&printer);
-    }
+    QString file_path;
+    QString page_source = PageSourceForPrinting(file_path);
+    m_WebViewPrinter->setContent(file_path, page_source, true);
 }

@@ -41,12 +41,19 @@ class EmbeddedPython
 
 
 public:
-    static EmbeddedPython* instance();
-    ~EmbeddedPython();
+    static EmbeddedPython& instance() {
+        static EmbeddedPython the_instance;
+        return the_instance;
+    }
 
+    EmbeddedPython(const EmbeddedPython&) = delete;
+    EmbeddedPython& operator=(const EmbeddedPython&) = delete;
+    
     QString embeddedRoot();
 
     bool addToPythonSysPath(const QString& modulepath);
+
+    void setupRedirects();
 
     QVariant runInPython(const QString &module_name,
                          const QString &function_name,
@@ -65,6 +72,7 @@ public:
 private:
 
     EmbeddedPython();
+    ~EmbeddedPython();
 
     QVariant PyObjectToQVariant(PyObject *po, bool ret_python_object = false);
 
@@ -74,9 +82,9 @@ private:
                                     bool useMsgBox = true);
 
     static QMutex m_mutex;
-    static EmbeddedPython *m_instance;
     static int m_pyobjmetaid;
     static PyThreadState *m_threadstate;
     static int m_listintmetaid;
+    static int m_stdpairintintmetaid;
 };
 #endif // EMBEDDEDPYTHON_H

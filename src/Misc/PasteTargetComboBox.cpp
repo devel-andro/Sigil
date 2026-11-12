@@ -1,8 +1,9 @@
 /************************************************************************
 **
-**  Copyright (C) 2012 John Schember <john@nachtimwald.com>
-**  Copyright (C) 2012 Dave Heiland
-**  Copyright (C) 2012 Grant Drake
+**  Copyright (C) 2018-2026 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2012      John Schember <john@nachtimwald.com>
+**  Copyright (C) 2012      Dave Heiland
+**  Copyright (C) 2012      Grant Drake
 **
 **  This file is part of Sigil.
 **
@@ -25,6 +26,7 @@
 #include <QtGui/QClipboard>
 #include <QtWidgets/QLineEdit>
 
+#include "Misc/Utility.h"
 #include "Misc/PasteTargetComboBox.h"
 
 PasteTargetComboBox::PasteTargetComboBox(QWidget *parent)
@@ -37,15 +39,16 @@ void PasteTargetComboBox::PasteText(const QString &text)
     // I originally tried logic manipulating the selected text. But the problem is that QLineEdit
     // does not support an Undo() if you call setEditText(), only if you call paste()
     // The only downside is that we will want to save/restore the clipboard state around it.
+    QString txt = Utility::UseNFC(text);
     emit ClipboardSaveRequest();
-    QApplication::clipboard()->setText(text);
+    QApplication::clipboard()->setText(txt);
     lineEdit()->paste();
     emit ClipboardRestoreRequest();
 }
 
 bool PasteTargetComboBox::PasteClipNumber(int clip_number)
 {
-    ClipEditorModel::clipEntry *clip = ClipEditorModel::instance()->GetEntryFromNumber(clip_number);
+    ClipEditorModel::clipEntry *clip = ClipEditorModel::instance().GetEntryFromNumber(clip_number);
     if (!clip) {
         return false;
     }

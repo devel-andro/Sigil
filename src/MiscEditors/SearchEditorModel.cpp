@@ -1,9 +1,9 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford, Ontario, Canada
-**  Copyright (C) 2012 John Schember <john@nachtimwald.com>
-**  Copyright (C) 2012 Dave Heiland
-**  Copyright (C) 2012 Grant Drake
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2012      John Schember <john@nachtimwald.com>
+**  Copyright (C) 2012      Dave Heiland
+**  Copyright (C) 2012      Grant Drake
 **
 **  This file is part of Sigil.
 **
@@ -36,16 +36,7 @@
 #include "sigil_constants.h"
 #include "sigil_exception.h"
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    #define QT_ENUM_SKIPEMPTYPARTS Qt::SkipEmptyParts
-    #define QT_ENUM_KEEPEMPTYPARTS Qt::KeepEmptyParts
-#else
-    #define QT_ENUM_SKIPEMPTYPARTS QString::SkipEmptyParts
-    #define QT_ENUM_KEEPEMPTYPARTS QString::KeepEmptyParts
-#endif
-
-static const QString SETTINGS_FILE          = "sigil_searches_v2.ini";
-static const QString OLD_SETTINGS_FILE      = "sigil_searches.ini";
+static const QString SETTINGS_FILE = SEARCHES_V6_SETTINGS_FILE;
 
 static const QString SETTINGS_GROUP         = "search_entries";
 static const QString ENTRY_NAME             = "Name";
@@ -60,16 +51,6 @@ static const int FULLNAME_ROLE = Qt::UserRole + 2;
 
 static const QString SEARCH_EXAMPLES_FILE = "search_entries.ini";
 
-SearchEditorModel *SearchEditorModel::m_instance = 0;
-
-SearchEditorModel *SearchEditorModel::instance()
-{
-    if (m_instance == 0) {
-        m_instance = new SearchEditorModel();
-    }
-
-    return m_instance;
-}
 
 SearchEditorModel::SearchEditorModel(QObject *parent)
     : QStandardItemModel(parent),
@@ -77,18 +58,6 @@ SearchEditorModel::SearchEditorModel(QObject *parent)
       m_IsDataModified(false)
 {
     m_SettingsPath = Utility::DefinePrefsDir() + "/" + SETTINGS_FILE;
-    QString OldSettingsPath = Utility::DefinePrefsDir() + "/" + OLD_SETTINGS_FILE;
-    QFileInfo fi(m_SettingsPath);
-    if (!fi.exists()) {
-        QFileInfo oldfi(OldSettingsPath);
-        if (oldfi.exists() && oldfi.isFile()) {
-            // create v2 settings file from old one
-            bool success = QFile::copy(oldfi.absoluteFilePath(), m_SettingsPath);
-            if (!success) {
-                qDebug() << "Failed to create v2 saved searches from old";
-            }
-        }
-    }
     QStringList header;
     header.append(tr("Name"));
     header.append(tr("Find"));
@@ -111,13 +80,6 @@ SearchEditorModel::SearchEditorModel(QObject *parent)
             this, SLOT(RowsRemovedHandler(const QModelIndex &, int, int)));
 }
 
-SearchEditorModel::~SearchEditorModel()
-{
-    if (m_instance) {
-        delete m_instance;
-        m_instance = 0;
-    }
-}
 
 void SearchEditorModel::SetDataModified(bool modified)
 {
@@ -269,7 +231,7 @@ void SearchEditorModel::SettingsFileChanged(const QString &path) const
             m_FSWatcher->addPath(path);
         }
 
-        instance()->LoadInitialData();
+        instance().LoadInitialData();
         emit SettingsFileUpdated();
     }
 }
@@ -422,7 +384,7 @@ void SearchEditorModel::AddFullNameEntry(SearchEditorModel::searchEntry *entry, 
     QString entry_name = entry->name;
 
     if (entry->name.contains("/")) {
-        QStringList group_names = entry->name.split("/", QT_ENUM_SKIPEMPTYPARTS);
+        QStringList group_names = entry->name.split("/", Qt::SkipEmptyParts);
         entry_name = group_names.last();
 
         if (!entry->is_group) {
@@ -528,6 +490,15 @@ QString SearchEditorModel::BuildControlsToolTip(const QString & controls)
         if (controls.contains("NX")) {
             tooltip_controls.append("NX - " + tr("Target: NCX File") + "\n");
         }
+        if (controls.contains("SV")) {
+            tooltip_controls.append("SV - " + tr("Target: Selected SVG Files") + "\n");
+        }
+        if (controls.contains("SJ")) {
+            tooltip_controls.append("SJ - " + tr("Target: Selected Javascript Files") + "\n");
+        }
+        if (controls.contains("SX")) {
+            tooltip_controls.append("SX - " + tr("Target: Selected Misc XML Files") + "\n");
+        }
         if (controls.contains("DA")) {
             tooltip_controls.append("DA - " + tr("Option: DotAll") + "\n");
         }
@@ -539,6 +510,9 @@ QString SearchEditorModel::BuildControlsToolTip(const QString & controls)
         }
         if (controls.contains("WR")) {
             tooltip_controls.append("WR - " + tr("Option: Wrap") + "\n");
+        }
+        if (controls.contains("TO")) {
+            tooltip_controls.append("TO - " + tr("Option: Text Only") + "\n");
         }
     }
     return tooltip_controls;

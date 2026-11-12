@@ -1,6 +1,6 @@
 /************************************************************************
  **
- **  Copyright (C) 2020-2021 Kevin B. Hendricks
+ **  Copyright (C) 2020-2024 Kevin B. Hendricks
  **
  **  This file is part of Sigil.
  **
@@ -41,10 +41,12 @@ ViewFont::ViewFont(QWidget *parent)
       m_bp(new QToolButton(this)),
       m_layout(new QVBoxLayout(this))
 {
+    setAttribute(Qt::WA_DeleteOnClose, true);
     m_layout->addWidget(m_fv);
     m_bp->setToolTip(tr("Close this window"));
     m_bp->setText(tr("Done"));
     m_bp->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_bp->setFocusPolicy(Qt::TabFocus);
     QHBoxLayout* hl = new QHBoxLayout();
     hl->addStretch(0);
     hl->addWidget(m_bp);
@@ -98,9 +100,7 @@ void ViewFont::WriteSettings()
 
 void ViewFont::ConnectSignalsToSlots()
 {
-#ifdef Q_OS_MAC
     MainApplication *mainApplication = qobject_cast<MainApplication *>(qApp);
     connect(mainApplication, SIGNAL(applicationPaletteChanged()), this, SLOT(ReloadViewer()));
-#endif
     connect(m_bp, SIGNAL(clicked()), this, SLOT(accept()));
 }

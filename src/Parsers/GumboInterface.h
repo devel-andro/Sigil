@@ -64,7 +64,7 @@ public:
     QList<GumboNode *> findnodes(const QString &aSelector);
     CSelection find(const QString &aSelector);
 
-    QString prettyprint(QString indent_chars="  ");
+    QString prettyprint(bool keep_whitespace);
 
     // returns list tags that match manifest properties
     QStringList get_all_properties();
@@ -140,9 +140,9 @@ private:
 
     std::string serialize_contents(GumboNode* node, enum UpdateTypes doupdates = NoUpdates);
 
-    std::string prettyprint(GumboNode* node, int lvl, const std::string indent_chars);
+    std::string prettyprint(GumboNode* node, int lvl);
 
-    std::string prettyprint_contents(GumboNode* node, int lvl, const std::string indent_chars);
+    std::string prettyprint_contents(GumboNode* node, int lvl);
 
     std::string build_doctype(GumboNode *node);
 
@@ -186,6 +186,7 @@ private:
     std::string                     m_newbody;
     QString                         m_version;
     QString                         m_newbookpath;
+    bool                            m_keep_whitespace;
     
 };
 

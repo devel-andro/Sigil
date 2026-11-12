@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2021 Kevin B. Hendricks
+**  Copyright (C) 2019-2026 Kevin B. Hendricks
 **  Copyright (C) 2013      Dave Heiland
 **
 **  This file is part of Sigil.
@@ -28,28 +28,31 @@
 #include <QGuiApplication>
 #include <QPrinter>
 #include <QtWidgets/QLayout>
-#include <QtWebEngineWidgets/QWebEngineView>
-#include <QtWebEngineWidgets/QWebEngineSettings>
-#include <QtWebEngineWidgets/QWebEngineProfile>
+#include <QtWebEngineWidgets>
+#include <QtWebEngineCore>
+#include <QWebEngineView>
+#include <QWebEngineSettings>
+#include <QWebEngineProfile>
 
 #include "ViewEditors/SimplePage.h"
 #include "Misc/Utility.h"
+#include "Misc/WebProfileMgr.h"
 #include "Widgets/ImageView.h"
 
 static const QString IMAGE_HTML_BASE =
-    "<html>"
+    "<html xmlns=\"http://www.w3.org/1999/xhtml\">"
     "<head>"
     "<style type=\"text/css\">"
-    "body { -webkit-user-select: none; }"
-    "img { display: block; margin-left: auto; margin-right: auto; border-style: solid; border-width: 1px; }"
+    "body { -webkit-user-select: none; margin: 0; }"
+    "div { text-align: center; margin: 8px 0; }"
+    "img { display: block; margin: 0 auto; border: 1px solid; max-width: 100%; max-height: calc(100vh - 75px); }"
     "hr { width: 75%; }"
-    "div { text-align: center; }"
     "</style>"
     "</head>"
     "<body>"
-    "<p><img src=\"%1\" /></p>"
-    "<hr />"
     "<div>%2&times;%3px | %4 KB | %5%6</div>"
+    "<hr />"
+    "<p><img src=\"%1\" /></p>"
     "</body>"
     "</html>";
 
@@ -60,27 +63,60 @@ ImageView::ImageView(QWidget *parent)
     m_WebView(new QWebEngineView(this)),
     m_layout(new QVBoxLayout(this))
 {
-    m_WebView->setPage(new SimplePage(m_WebView));
+    QWebEngineProfile* profile = WebProfileMgr::instance().GetOneTimeProfile();
+    m_WebView->setPage(new SimplePage(profile, m_WebView));
     m_WebView->setContextMenuPolicy(Qt::NoContextMenu);
     m_WebView->setFocusPolicy(Qt::NoFocus);
     m_WebView->setAcceptDrops(false);
     m_WebView->setUrl(QUrl("about:blank"));
     m_layout->addWidget(m_WebView);
+#if 0
+    connect(m_WebView, SIGNAL(loadFinished(bool)), this, SLOT(LoadIsFinished(bool)));
+    connect(m_WebView, SIGNAL(loadStarted()), this, SLOT(LoadIsStarted()));
+    connect(m_WebView, SIGNAL(loadProgress(int)), this, SLOT(LoadIsProgressing(int)));
+# endif
 }
 
 ImageView::~ImageView()
 {
 }
 
+#if 0
+void ImageView::LoadIsStarted()
+{
+    qDebug() << "load started";
+    m_ready = false;
+}
+
+void ImageView::LoadIsFinished(bool okay)
+{
+    qDebug() << "okay is: " << okay;
+    m_ready = true;
+}
+
+void ImageView::LoadIsProgressing(int progress)
+{
+    qDebug() << "progress is: " << progress;
+}
+
+bool ImageView::isReady()
+{
+    return (m_ready == true);
+}
+#endif
+
+
 void ImageView::ShowImage(QString path)
 {
     m_path = path;
-    m_WebView->page()->profile()->clearHttpCache();
+    // m_WebView->page()->profile()->clearHttpCache();
     const QFileInfo fileInfo = QFileInfo(path);
     const double ffsize = fileInfo.size() / 1024.0;
     const QString fsize = QLocale().toString(ffsize, 'f', 2);
     const QImage img(path);
-    const QUrl imgUrl = QUrl::fromLocalFile(path);
+    QUrl imgUrl = QUrl::fromLocalFile(path);
+    imgUrl.setScheme("sigil");
+    imgUrl.setHost("");
     QString colors_shades = img.isGrayscale() ? tr("shades") : tr("colors");
     QString grayscale_color = img.isGrayscale() ? tr("Grayscale") : tr("Color");
     QString colorsInfo = "";
@@ -99,6 +135,9 @@ void ImageView::ShowImage(QString path)
         html = Utility::AddDarkCSS(html);
     }
     m_WebView->page()->setBackgroundColor(Utility::WebViewBackgroundColor());
+    // qDebug() << "ImageView: " << path;
+    // qDebug() << "ImageView: " << imgUrl;
+    // qDebug() << "ImageView: " << html;
     m_WebView->setHtml(html, imgUrl);
 }
 

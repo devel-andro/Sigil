@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2020      Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2012-2013 John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012-2013 Dave Heiland
 **
@@ -25,12 +25,12 @@
 #ifndef SPELLCHECKEDITOR_H
 #define SPELLCHECKEDITOR_H
 
-#include <QtWidgets/QDialog>
-#include <QtGui/QStandardItemModel>
-#include <QtWidgets/QAction>
-#include <QtWidgets/QMenu>
+#include <QDialog>
+#include <QStandardItemModel>
+#include <QAction>
+#include <QMenu>
 #include <QShortcut>
-#include <QtCore/QSharedPointer>
+#include <QSharedPointer>
 #include <QPointer>
 
 #include "Misc/SettingsStore.h"
@@ -80,16 +80,20 @@ private slots:
     void Ignore();
     void Add();
     void SelectAll();
+    void Save();
+    void CopySelected();
     void ChangeAll();
 
     void toggleShowAllWords();
-    void toggleCaseInsensitiveSort();
+    void toggleLocaleAwareSort();
 
     void FilterEditTextChangedSlot(const QString &text);
 
     void OpenContextMenu(const QPoint &point);
 
     void Sort(int logicalindex, Qt::SortOrder order);
+
+    void SelectRow(int row);
 
 private:
     void CreateModel(int logicalindex, Qt::SortOrder order);
@@ -100,8 +104,6 @@ private:
     int GetSelectedRow();
 
     int SelectedRowsCount();
-
-    void SelectRow(int row);
 
     QList<QStandardItem *> GetSelectedItems();
 
@@ -117,6 +119,8 @@ private:
     QAction *m_Add;
     QAction *m_Find;
     QAction *m_SelectAll;
+    QAction *m_SaveSelected;
+    QAction *m_CopySelected;
 
     QSharedPointer<Book> m_Book;
 
@@ -130,8 +134,10 @@ private:
 
     QShortcut * m_FilterSC;
     QShortcut * m_ShowAllSC;
-    QShortcut * m_NoCaseSC;
+    QShortcut * m_AwareSC;
     QShortcut * m_RefreshSC;
+    QString m_LastDirSaved;
+    QString m_LastFileSaved;
 
     Ui::SpellcheckEditor ui;
 };

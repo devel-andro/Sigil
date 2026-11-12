@@ -49,7 +49,7 @@ static const QStringList XML_EXTENSIONS = QStringList() << "htm" << "html" << "x
 
 static const QStringList CSS_EXTENSIONS = QStringList() << "css";
 
-SourceViewer::SourceViewer(const QString&file1, const QString& data, QWidget *parent)
+SourceViewer::SourceViewer(const QString& file1, const QString& data, QWidget *parent)
     : QDialog(parent),
       m_view(new TextView(this)),
       m_lbl(new QLabel(file1, this)),
@@ -90,7 +90,7 @@ SourceViewer::~SourceViewer()
 }
 
 
-// This is needed on macOS to force the 
+// This is needed on all platforms to force the 
 // syntax highlighting to start from scratch
 // when dark to light mode is switched dynamically
 void SourceViewer::ReloadViewer()
@@ -104,13 +104,13 @@ void SourceViewer::ReloadViewer()
 
 void SourceViewer::LoadViewer()
 {
-    int blockno = 0;
+    // int blockno = 0;
     int lineno = 1;
     QStringList recs = m_data.split("\n");
     foreach(QString rec, recs) {
         m_view->insertPlainText(rec + "\n");
         m_blockmap << QString::number(lineno);
-        blockno++;
+        // blockno++;
         lineno++;
     }
     m_view->setBlockMap(m_blockmap);
@@ -206,10 +206,10 @@ void SourceViewer::reject()
 
 void SourceViewer::connectSignalsToSlots()
 {
-#ifdef Q_OS_MAC
+    // this signal works on all platforms now
     MainApplication *mainApplication = qobject_cast<MainApplication *>(qApp);
     connect(mainApplication, SIGNAL(applicationPaletteChanged()), this, SLOT(ReloadViewer()));
-#endif
+
     connect(m_nav, SIGNAL(NextPage(int)), this, SLOT(next_page(int)));
     connect(m_nav, SIGNAL(DoSearch(bool)),  this, SLOT(do_search(bool)));
     connect(m_nav, SIGNAL(DoDone()),        this, SLOT(accept()));

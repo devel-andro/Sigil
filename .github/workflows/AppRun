@@ -1,0 +1,27 @@
+#! /usr/bin/env bash
+
+# make sure errors in sourced scripts will cause this script to stop
+set -e
+
+this_dir="$(readlink -f "$(dirname "$0")")"
+
+SIGIL_EXTRA_ROOT="$this_dir/usr/share/sigil"
+export SIGIL_EXTRA_ROOT
+echo "${SIGIL_EXTRA_ROOT}"
+
+LD_LIBRARY_PATH="$this_dir/usr/lib:$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH
+echo $LD_LIBRARY_PATH
+
+# Incorporate old qt-hook script contents here since the auto-hook generation stopped upstream
+case "${XDG_CURRENT_DESKTOP}" in
+    *GNOME*|*gnome*|*XFCE*)
+        export QT_QPA_PLATFORMTHEME=gtk3
+        ;;
+esac
+
+export SIGIL_APPIMAGE_LIB_DIR="$this_dir/usr/lib"
+export SIGIL_EXEC_WRAPPER="$this_dir/usr/optional/exec_wrapper.so"
+
+# Call the sigil binary directly since AppRun.wrapped is no longer auto-generated
+LD_PRELOAD="$this_dir"/usr/optional/exec_wrapper.so exec "$this_dir"/usr/bin/sigil "$@"

@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2020 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2011      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012      Dave Heiland
 **
@@ -58,6 +58,8 @@ private:
     void connectSignalsToSlots();
 
     bool m_disable_gpu;
+    int m_remoteOn;
+    int m_javascriptOn;
     Ui::GeneralSettingsWidget ui;
 };
 

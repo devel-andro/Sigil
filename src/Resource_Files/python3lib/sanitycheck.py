@@ -17,6 +17,8 @@ SPECIAL_HANDLING_TAGS = OrderedDict([
 
 SPECIAL_HANDLING_TYPES = ['xmlheader', 'comment', 'doctype', 'cdata', 'pi']
 
+WHITESPACE_CHARS = (' ', '\n', '\r', '\t')
+
 MAX_TAG_LEN = 20
 
 VOID_TAGS = ("area","base","basefont","bgsound","br","col","command",
@@ -49,8 +51,8 @@ class SanityCheck(object):
         self.doctype = 0
 
         # to track tag nesting
-        self.tagpath = []
-        self.tagpositions = []
+        self.tagpath = ["None"]
+        self.tagpositions = [-1]
 
         # error reporting
         self.has_error = False
@@ -70,6 +72,9 @@ class SanityCheck(object):
                 self.has_error = True
             if self.headcnt != 1: 
                 self.errors.append((1, 0, 'Missing or multiple "head" tags'))
+                self.has_error = True
+            if self.xmldeclare != 1: 
+                self.errors.append((1, 0, 'Missing or multiple "xml declaration header"'))
                 self.has_error = True
         return (self.has_error, self.errors)
 
@@ -105,6 +110,13 @@ class SanityCheck(object):
             ttype, backstep = SPECIAL_HANDLING_TAGS[tname]
             tattr['special'] = s[p:backstep]
             return tname, ttype, tattr
+        # handle special case of xml declaration header
+        if s[b:b+4] == "?xml":
+            p = b+4
+            tname = "?xml"
+            ttype, backstep = SPECIAL_HANDLING_TAGS[tname]
+            tattr['special'] = s[p:backstep]
+            return tname, ttype, tattr
         # handle special case of generic xml processing instruction (pi)
         if tname != "?xml" and s[b:b+1] == "?":
             p = b+1
@@ -134,19 +146,20 @@ class SanityCheck(object):
         if ttype is None:
             # parse any attributes
             while s.find('=',p) != -1 :
-                while s[p:p+1] == ' ' : p += 1
+                while s[p:p+1] in WHITESPACE_CHARS : p += 1
                 b = p
                 while s[p:p+1] != '=' : p += 1
                 aname = s[b:p].lower()
-                aname = aname.rstrip(' ')
+                aname = aname.rstrip(' \n\r\t')
                 p += 1
-                while s[p:p+1] == ' ' : p += 1
+                while s[p:p+1] in WHITESPACE_CHARS : p += 1
                 if s[p:p+1] in ('"', "'") :
                     qt = s[p:p+1]
                     p = p + 1
                     b = p
                     while s[p:p+1] != qt: 
                         p += 1
+                        # Opening quote with no closing quote
                         if p >= taglen:
                             error_msg = 'Attribute "' +  aname +  '" has unmatched quotes on attribute value'
                             self.errors.append((self.tag_start[0], self.tag_start[1], error_msg))
@@ -158,12 +171,22 @@ class SanityCheck(object):
                     b = p
                     while s[p:p+1] not in ('>', '/', ' ') : 
                         p += 1
+                        # Closing quote with no opening quote
+                        if s[p:p+1] in ('"', "'"):
+                            error_msg = 'Attribute "' +  aname +  '" has unmatched quotes on attribute value'
+                            self.errors.append((self.tag_start[0], self.tag_start[1], error_msg))
+                            self.has_error = True
+                            return None, None, None
                         if p >= taglen:
                             error_msg = 'Attribute "' + aname + '" has unterminated attribute value' 
                             self.errors.append((self.tag_start[0], self.tag_start[1], error_msg))
                             self.has_error = True
                             return None, None, None
                     val = s[b:p]
+                    error_msg = 'Attribute "' + aname + '" has missing quotes surrounding the value'
+                    self.errors.append((self.tag_start[0], self.tag_start[1], error_msg))
+                    self.has_error = True
+                    return None, None, None
                 tattr[aname] = val
         # label beginning and single tags
         if ttype is None:
@@ -310,7 +333,7 @@ class SanityCheck(object):
                     last_begin = self.tagpath[-1]
                     last_pos = self.tagpositions[-1]
                     if last_begin != tname:
-                        error_msg = 'Improperly nested tags: parsing end tag "' + tname + '" but current parse path is "' + tp + '". See line %d col %d' % last_pos
+                        error_msg = 'Improperly nested tags: parsing end tag "' + tname + '" but current parse path is "' + tp + '". See line %d col %d' % (self.line, self.col)
                         self.errors.append((self.tag_start[0], self.tag_start[1], error_msg))
                         self.has_error = True
                         break

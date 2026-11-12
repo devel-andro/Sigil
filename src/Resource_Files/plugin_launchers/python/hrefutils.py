@@ -2,6 +2,8 @@
 # -*- coding: utf-8 -*-
 # vim:ts=4:sw=4:softtabstop=4:smarttab:expandtab
 
+# Copyright (c) 2014-2025 Kevin B. Hendricks, and Doug Massay
+
 import sys
 
 from urllib.parse import unquote
@@ -11,6 +13,7 @@ from urllib.parse import urlsplit
 # https://www.w3.org/publishing/epub3/epub-spec.html#sec-cmt-supported
 
 ext_mime_map = {
+    '.avif'  : 'image/avif',
     '.bm'    : 'image/bmp',
     '.bmp'   : 'image/bmp',
     '.css'   : 'text/css',
@@ -21,6 +24,7 @@ ext_mime_map = {
     '.jpeg'  : 'image/jpeg',
     '.jpg'   : 'image/jpeg',
     '.js'    : 'application/javascript',
+    '.jxl'   : 'image/jxl',
     '.m4a'   : 'audio/mp4',
     '.m4v'   : 'video/mp4',
     '.mp3'   : 'audio/mpeg',
@@ -31,6 +35,7 @@ ext_mime_map = {
     '.ogv'   : 'video/ogg',
     '.opf'   : 'application/oebps-package+xml',
     '.otf'   : 'font/otf',
+    '.pdf'   : 'application/pdf',
     '.pls'   : 'application/pls+xml',
     '.png'   : 'image/png',
     '.smil'  : 'application/smil+xml',
@@ -63,6 +68,8 @@ mime_group_map = {
     'image/png'                               : 'Images',
     'image/gif'                               : 'Images',
     'image/svg+xml'                           : 'Images',
+    'image/jxl'                               : 'Images',
+    'image/avif'                              : 'Images',
     'image/bmp'                               : 'Images',  # not a core media type
     'image/tiff'                              : 'Images',  # not a core media type
     'image/webp'                              : 'Images',  # not a core media type
@@ -81,7 +88,6 @@ mime_group_map = {
     'application/font-otf'                    : 'Fonts',  # deprecated
     'application/font-woff'                   : 'Fonts',  # deprecated
     'application/font-woff2'                  : 'Fonts',  # deprecated
-    'application/x-font-ttf'                  : 'Fonts',  # deprecated
     'application/x-truetype-font'             : 'Fonts',  # deprecated
     'application/x-opentype-font'             : 'Fonts',  # deprecated
     'application/x-font-ttf'                  : 'Fonts',  # deprecated
@@ -106,6 +112,7 @@ mime_group_map = {
     'application/vnd.adobe.page-map+xml'      : 'Misc',
     'application/smil+xml'                    : 'Misc',
     'application/adobe-page-template+xml'     : 'Misc',
+    'application/pdf'                         : 'Misc',
     'application/vnd.adobe-page-template+xml' : 'Misc',
     'text/javascript'                         : 'Misc',
     'application/javascript'                  : 'Misc',
@@ -183,7 +190,7 @@ def getRelativeHREF(apath, afragment):
         afragment = afragment.decode('utf-8')
     href = urlencodepart(apath)
     if afragment:
-        href = href + "#" + urlencodepart(fragment)
+        href = href + "#" + urlencodepart(afragment)
     return href
 
 
@@ -353,6 +360,14 @@ def main():
     print('Testing startingDir(bookpath')
     print('    bookpath: ', p1)
     print('"' + startingDir(p1) + '"')
+    print('    ')
+
+    p1 = 'OEBPS/Text/book1/chapter 1.xhtml'
+    f1 = 'page#015'
+    print('Testing getRelativeHREF(apath, afragment)')
+    print('    apath:     ', p1)
+    print('    afragment: ', f1)
+    print(getRelativeHREF(p1, f1))
     print('    ')
 
     bookpaths = []

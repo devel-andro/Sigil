@@ -1,6 +1,6 @@
 /************************************************************************
  **
- **  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
+ **  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
  **
  **  This file is part of Sigil.
  **
@@ -57,6 +57,7 @@ PluginWidget::PluginWidget()
     m_qlcbxs.append(ui.comboBox_9);
     m_qlcbxs.append(ui.comboBox_10);
 
+    ui.pluginTable->setTabKeyNavigation(false);
     readSettings();
     connectSignalsToSlots();
 }
@@ -72,13 +73,10 @@ PreferencesWidget::ResultActions PluginWidget::saveSettings()
 
     SettingsStore settings;
 
-    PluginDB *pdb = PluginDB::instance();
-
-    pdb->set_engine_path("python3.4", ui.editPathPy3->text());
-
+    PluginDB::instance().set_engine_path("python3.4", ui.editPathPy3->text());
 
     // handle the 10 assignable plugin buttons
-    QHash<QString, Plugin*> plugins = pdb->all_plugins();
+    QHash<QString, Plugin*> plugins = PluginDB::instance().all_plugins();
     QStringList keys = plugins.keys();
     QStringList pluginmap;
     QStringList pnames;
@@ -130,10 +128,9 @@ void PluginWidget::readSettings()
     m_useBundledInterp = settings.useBundledInterp();
 
     // Load the available plugin information
-    PluginDB *pdb = PluginDB::instance();
     QHash<QString, Plugin *> plugins;
 
-    ui.editPathPy3->setText(pdb->get_engine_path("python3.4"));
+    ui.editPathPy3->setText(PluginDB::instance().get_engine_path("python3.4"));
 
     ui.pluginTable->setSortingEnabled(false);
 
@@ -143,7 +140,7 @@ void PluginWidget::readSettings()
     }
 
     int nrows = 0;
-    plugins = pdb->all_plugins();
+    plugins = PluginDB::instance().all_plugins();
     foreach(Plugin *p, plugins) {
         ui.pluginTable->insertRow(nrows);
         setPluginTableRow(p,nrows);
@@ -201,10 +198,8 @@ void PluginWidget::pluginSelected(int row, int col)
 
 void PluginWidget::addPlugin()
 {
-    QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions();
+
     QString zippath = QFileDialog::getOpenFileName(this, 
                                                    tr("Select Plugin Zip Archive"), 
                                                    m_LastFolderOpen, 
@@ -215,9 +210,7 @@ void PluginWidget::addPlugin()
         return;
     }
 
-    PluginDB *pdb = PluginDB::instance();
-
-    PluginDB::AddResult ar = pdb->add_plugin(zippath);
+    PluginDB::AddResult ar = PluginDB::instance().add_plugin(zippath);
     
     // Save the last folder used for adding plugin zips
     m_LastFolderOpen = QFileInfo(zippath).absolutePath();
@@ -249,7 +242,7 @@ void PluginWidget::addPlugin()
         pluginname.truncate(version_index);
     }
 
-    Plugin *p = pdb->get_plugin(pluginname);
+    Plugin *p = PluginDB::instance().get_plugin(pluginname);
 
     if (p == NULL) {
         return;
@@ -279,11 +272,10 @@ void PluginWidget::removePlugin()
 
     ui.pluginTable->setSortingEnabled(false);
 
-    PluginDB *pdb = PluginDB::instance();
     int row = ui.pluginTable->row(itemlist.at(0));
     QString pluginname = ui.pluginTable->item(row, PluginWidget::NameField)->text();
     ui.pluginTable->removeRow(row);
-    pdb->remove_plugin(pluginname);
+    PluginDB::instance().remove_plugin(pluginname);
     ui.pluginTable->resizeColumnsToContents();
 
 
@@ -316,7 +308,6 @@ void PluginWidget::removePlugin()
 
 void PluginWidget::removeAllPlugins()
 {
-    PluginDB *pdb = PluginDB::instance();
     QMessageBox msgBox;
 
     msgBox.setIcon(QMessageBox::Warning);
@@ -332,7 +323,7 @@ void PluginWidget::removeAllPlugins()
         while (ui.pluginTable->rowCount() > 0) {
             ui.pluginTable->removeRow(0);
         }
-        pdb->remove_all_plugins();
+        PluginDB::instance().remove_all_plugins();
         ui.pluginTable->resizeColumnsToContents();
         ui.pluginTable->setSortingEnabled(true);
     }
@@ -374,10 +365,8 @@ void PluginWidget::AutoFindPy3()
 
 void PluginWidget::SetPy3()
 {
-    QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions();
+
     QString name = QFileDialog::getOpenFileName(this, 
                                                 tr("Select Interpreter"),
                                                 QString(),

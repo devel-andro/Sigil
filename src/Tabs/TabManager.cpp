@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2024 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2009-2011  Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -20,6 +20,8 @@
 **
 *************************************************************************/
 
+#include <QPalette>
+#include <QApplication>
 #include <QDebug>
 #include "BookManipulation/CleanSource.h"
 #include "ResourceObjects/Resource.h"
@@ -29,19 +31,24 @@
 #include "ResourceObjects/HTMLResource.h"
 #include "ResourceObjects/ImageResource.h"
 #include "ResourceObjects/MiscTextResource.h"
+#include "ResourceObjects/XMLResource.h"
 #include "ResourceObjects/SVGResource.h"
+#include "ResourceObjects/PdfResource.h"
+#include "Tabs/PdfTab.h"
 #include "Tabs/AVTab.h"
 #include "Tabs/FontTab.h"
 #include "Tabs/CSSTab.h"
 #include "Tabs/FlowTab.h"
 #include "Tabs/ImageTab.h"
 #include "Tabs/MiscTextTab.h"
+#include "Tabs/XMLTab.h"
 #include "Tabs/SVGTab.h"
 #include "Tabs/NCXTab.h"
 #include "Tabs/OPFTab.h"
 #include "Tabs/TabManager.h"
 #include "Tabs/WellFormedContent.h"
 #include "Tabs/TabBar.h"
+
 
 TabManager::TabManager(QWidget *parent)
     :
@@ -180,6 +187,15 @@ void TabManager::ReopenTabs()
     OpenResource(currentTab->GetLoadedResource(), -1, -1, QString());
 }
 
+void TabManager::PerformThemeChangeRefresh()
+{
+    for (int i = 0; i < count(); ++i) {
+        ContentTab *tab = qobject_cast<ContentTab *>(widget(i));
+        if (tab) {
+            tab->ThemeChangeRefresh();
+        }
+    }
+}
 
 void TabManager::SaveTabData()
 {
@@ -248,7 +264,12 @@ void TabManager::OpenResource(Resource *resource,
                           caret_location_to_scroll_to, fragment, grab_focus);
 
     if (new_tab) {
-        m_newTab = new_tab;
+        // only set m_newTab if going to be current tab (ie focus was grabbed)
+        // otherwise after injection of new tab preceding_current_tab will prevent
+        // proper updating of preview
+        if (grab_focus) {
+            m_newTab = new_tab;
+        }
         AddNewContentTab(new_tab, precede_current_tab);
         emit ShowStatusMessageRequest("");
     } else {
@@ -487,7 +508,11 @@ void TabManager::CloseTab(int tab_index, bool force)
 void TabManager::UpdateTabName(ContentTab *renamed_tab)
 {
     Q_ASSERT(renamed_tab);
-    setTabText(indexOf(renamed_tab), renamed_tab->GetShortPathName());
+    int idx = indexOf(renamed_tab);
+    QString rawName = renamed_tab->GetShortPathName();
+    setTabToolTip(idx, rawName);
+    QString safeName = rawName.replace("&", "&&");
+    setTabText(idx, safeName);
 }
 
 void TabManager::SetFocusInTab()
@@ -587,6 +612,12 @@ bool TabManager::SwitchedToExistingTab(const Resource *resource,
             return true;
         }
 
+        PdfTab *pdf_tab = qobject_cast<PdfTab *>(tab);
+
+        if (pdf_tab != NULL) {
+            return true;
+        }
+
         FontTab *font_tab = qobject_cast<FontTab *>(tab);
 
         if (font_tab != NULL) {
@@ -675,6 +706,11 @@ ContentTab *TabManager::CreateTabForResource(Resource *resource,
             break;
         }
 
+        case Resource::PdfResourceType: {
+            tab = new PdfTab(qobject_cast<Resource *>(resource), this);
+            break;
+        }
+
         case Resource::FontResourceType: {
             tab = new FontTab(qobject_cast<Resource *>(resource), this);
             break;
@@ -709,6 +745,9 @@ bool TabManager::AddNewContentTab(ContentTab *new_tab, bool precede_current_tab)
     m_LastContentTab = old_tab;
 
     int idx = -1;
+    QString rawName = new_tab->GetShortPathName();
+    QString safeName = rawName.replace("&", "&&");
+
     if (!precede_current_tab) {
 
 #if defined(Q_OS_MAC)
@@ -716,9 +755,9 @@ bool TabManager::AddNewContentTab(ContentTab *new_tab, bool precede_current_tab)
         // This is still broken in Qt 5.12.2 
         // elided text is wrong when icon image present (hides most of elided text)
         // icon image still overlaps with name of tab if ElideNone is used
-        idx = addTab(new_tab, new_tab->GetShortPathName());
+        idx = addTab(new_tab, safeName);
 #else
-        idx = addTab(new_tab, new_tab->GetIcon(), new_tab->GetShortPathName());
+        idx = addTab(new_tab, new_tab->GetIcon(), safeName);
 #endif
 
         setCurrentWidget(new_tab);
@@ -732,9 +771,9 @@ bool TabManager::AddNewContentTab(ContentTab *new_tab, bool precede_current_tab)
         // This is still broken in Qt 5.12.2
         // elided text is wrong when icon image present image (hides most of elided text)
         // icon image still overlaps with name of tab if ElideNone is used
-        idx = insertTab(currentIndex(), new_tab, new_tab->GetShortPathName());
+        idx = insertTab(currentIndex(), new_tab, safeName);
 #else
-        idx = insertTab(currentIndex(), new_tab, new_tab->GetIcon(), new_tab->GetShortPathName());
+        idx = insertTab(currentIndex(), new_tab, new_tab->GetIcon(), safeName);
 #endif
 
     }

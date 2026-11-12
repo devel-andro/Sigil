@@ -2,7 +2,7 @@ Sigil
 =====
 
 Sigil is a free, open source, multi-platform ebook editor that uses
-Qt (and QtWebEngine). It is designed to edit books in ePub format (both ePub 2 and ePub 3).
+Qt6 (and QtWebEngine). It is designed to edit books in ePub format (both ePub 2 and ePub 3).
 
 
 Links
@@ -12,7 +12,7 @@ Links
 
 * Its current code repository is located at https://github.com/Sigil-Ebook/Sigil
 
-* Translations are located at https://www.transifex.com/projects/p/sigil/
+* Translations are located at https://explore.transifex.com/zdpo/sigil/
 
 * Support forums are located at http://www.mobileread.com/forums
     Select Sigil from the list of main forums
@@ -22,62 +22,72 @@ Links
 
 * Sigil User Guide is located at https://github.com/Sigil-Ebook/sigil-user-guide/releases/latest
 
+* An online version of the User Guide is available at: https://sigil-ebook.com/sigil-user-guide
+
 Issue Tracker
 =============
 
-Please do not use the issue tracker to ask questions.  Both of the main developers
+Please do not use the issue tracker to ask questions or suggest new features.  Both of the main developers
 of Sigil monitor the Sigil Forum at https://www.mobileread.com/forums.
-All questions should be directed there.
+All questions and feature requests should be directed there so that other interested users can help or comment.
 
 Issue tracking is intended for discussion around issues with the code. 
-It is also intended for actual bug tracking and for tracking feature requests.
+It is also intended for actual bug tracking.
 
-Feature requests opened on the issue tracker will be closed if there isn't
-anyone willing to implement the requested feature. Only items being worked
-will be left open.
+Feature requests opened on the issue tracker will be closed.
 
 
 Linux Build and Install
 =======================
 
-For newer Linux systems like Ubuntu 16.04 (and its derivitives: like Mint 18), or Arch Linux, or Debian Unstable, you should be able to compile Sigil using repo-provided dependencies. Instructions for doing so can be found in:
+Starting with Sigil 2.3.0, Qt6.4 is the minimum requirement to build Sigil. You'll need to use an older version if you need to build with Qt5.
 
-> [docs/Building_on_Linux.md](./docs/Building_on_Linux.md) ([or .html](./docs/Building_on_Linux.html))
+For newer Linux systems like Ubuntu 23.04 (and its derivatives), or Arch Linux, or Debian Trixie or Unstable, you should be able to compile Sigil using repo-provided dependencies. Instructions for doing so can be found in:
 
-For older Linux systems whose software repositories do not provide Qt5.4.0 (or higher), the
-detailed instructions for building/installing Sigil can be found in:
+> [docs/Building_on_Linux.md](./docs/Building_on_Linux.md)
 
-> [docs/Building_on_older_Linux.md](./docs/Building_on_older_Linux.md) ([or .html](./docs/Building_on_older_Linux.html))
+The Qt6 build documentation strives to provide both Debian- and Arch-based package names.
+
+For older Linux systems whose software repositories do not provide Qt6.4.0 (or higher), the
+detailed instructions for building/installing Sigil with Qt5 can be found in:
+
+> [docs/Building_on_Linux_older.md](./docs/Building_on_Linux.md)
+
+If your distro's Sigil package seems to be lagging too far behind. An up-to-date version of Sigil built by us is now part of our releases as an AppImage. 
+
 
 For Building on Mac OS X
 ========================
 
 Building using purely XCode is no longer supported on Mac OS X.  The easiest 
-way to build Sigil on Mac OS X is to use cmake 3.0 and the command line.   
+way to build Sigil on Mac OS X is to use cmake 3.X and the XCode CommandLineTools.   
 
-Also because Sigil now embeds Python 3.8.3, see  
+Also because Sigil now embeds Python 3.14.2, see  
 
-> [docs/Building_A_Relocatable_Python_3.8_Framework_on_MacOSX.txt](./docs/Building_A_Relocatable_Python_3.8_Framework_on_MacOSX.txt)
+> [docs/Building_A_Relocatable_Python_3.14_Framework_on_MacOSX.txt](./docs/Building_A_Relocatable_Python_3.14_Framework_on_MacOSX.txt)
 
-for detailed instructions on how to build a fully relocatable Python 3.8.X framework before
+for detailed instructions on how to build a fully relocatable Python 3.14.2 framework before
 building Sigil.  
 
-Sigil uses Qt-5.12.7 currently and will move to Qt-5.12.9 for the next release, see  
+For official releases Sigil uses Qt6.10.2 plus official local patches see:  
 
-> [docs/Building_Qt5_From_Source_on_MacOSX.txt](./docs/Building_Qt5_From_Source_on_MacOSX.txt)
-
+> [docs/Building_Qt6_From_Source_on_MacOSX.txt](./docs/Building_Qt6_From_Source_on_MacOSX.txt)
 
 And finally to build Sigil itself see:
 
-> [docs/Building_Sigil_On_MacOSX.txt](./docs/Building_Sigil_On_MacOSX.txt)
+> [docs/Building_Sigil_On_MacOSX_With_Qt6.txt](./docs/Building_Sigil_On_MacOSX_With_Qt6.txt)
 
 
-For Building on Windows
-========================
+For Installing/Building on Windows
+==================================
 
-To build Sigil on Windows, see:
+Sigil currently provides a Windows installer for x64 and will work on Windows 10 (1809) or newer.
 
-> [docs/Building_Sigil_on_Windows.md](./docs/Building_Sigil_on_Windows.md) ([or .html](./docs/Building_Sigil_on_Windows.html))
+The latest Sigil versions are also typically available via the [winget (Windows 10+)](https://winstall.app/apps/Sigil-Ebook.Sigil), [Chocolatey (Windows 10+)](https://community.chocolatey.org/packages/Sigil), and [Npackd](https://npackd.appspot.com/p?q=sigil) Windows package managers. There are no "scary" Microsoft warnings about unknown publishers if you install Sigil via one of these package managers. 
+
+To build Sigil on Windows yourself, see:
+
+> [docs/Building_Sigil_on_Windows_with_Qt6.md](./docs/Building_Sigil_on_Windows_with_Qt6.md).
 
 
 
@@ -95,19 +105,60 @@ Please see their respective folders for complete license information.
 
 Currently these projects include:
 
-* Hunspell - http://hunspell.sourceforge.net
-* MiniZip version 1.1
-* Perl-compatible Regular Expression Library 2 (pcre2 version 10.39)
-* ZLib Data Compression Library (zlib 1.2.8)
-* jQuery-2.2.4 (src/Resource_Files/javascript/jquery-2.2.4.min.js)
+* Hunspell 1.7.2 - https://github.com/hunspell/hunspell
+* MiniZip version 1.1 (plus some security changes)
+* Perl-compatible Regular Expression Library 2 (pcre2 version 10.46)
+* ZLib Data Compression Library (zlib 1.3.1)
+* jQuery-3.6.4 (src/Resource_Files/javascript/jquery-3.6.4.min.js)
 * jQuery.ScrollTo-2.1.2 (src/Resource_Files/javascript/jquery.scrollTo-2.1.2.min.js)
-* MathJax.js Version 2.75: (src/Resource_Files/polyfills)
+* MathJax.js Version 3.2.X [required minimum is 3.2.2]: (src/Resource_Files/polyfills)
 
-In addtion, Sigil uses the following other packages that have been specifically
+In addition, Sigil uses the following other third party packages that have been specifically
 modified for use inside Sigil:
 
 * Beautiful Soup 4 (src/Resource_Files/plugin_launchers/sigil_bs4)
-* Google's Gumbo Parser (internal/gumbo)
+* Sigil-gumbo based on Google's Gumbo Parser (internal/gumbo)
+* lexbor (css and core module) from https://github.com/lexbor/lexbor/ current master
+
+
+
+Sigil in Action
+===============
+
+![Sigil](docs/screencaps/sigil.png?raw=true) Sigil Main Window
+    
+
+![Sigil Dark Mode](docs/screencaps/sigil_dark.png?raw=true) Dark Mode
+
+
+![Generate TOC](docs/screencaps/generate_toc.png?raw=true) Generate ToC
+
+
+![Plugins](docs/screencaps/manage_plugins.png?raw=true) Python3 Plugins
+
+
+![Edit Metadata](docs/screencaps/edit_metadata.png?raw=true) Edit Metadata
+
+
+![Reports](docs/screencaps/reports.png?raw=true) Run Reports
+
+
+![Checkpoint Compare](docs/screencaps/checkpoint_compare.png?raw=true) Detect Changes
+
+
+![Preview Inspector](docs/screencaps/preview_inspector.png?raw=true) Preview's Inspector
+
+
+![Custom Layout](docs/screencaps/sigil_custom.png?raw=true) Customize Your Layout
+
+
+![Validation](docs/screencaps/validation_via_plugins.png?raw=true) Validate EPUB, CSS, XHTML, etc.
+
+
+![PageEdit Companion Program](docs/screencaps/pageedit.png?raw=true) Interface to PageEdit Visual XHtml Editor
+
+
+
 
 Package Versions of Sigil
 =========================

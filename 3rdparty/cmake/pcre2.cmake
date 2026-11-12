@@ -1,5 +1,3 @@
-cmake_minimum_required(VERSION 3.0)
-
 project(pcre2 C)
 
 INCLUDE(CheckIncludeFile)
@@ -66,11 +64,12 @@ ENDIF(HAVE_UNSIGNED_LONG_LONG)
 
 OPTION(PCRE2_STATIC_PIC "Build the static library with the option position independent code enabled." ON)
 
-SET(PCRE2_LINK_SIZE "2")
+SET(PCRE2_LINK_SIZE "4")
 SET(PCRE2_PARENS_NEST_LIMIT "250")
 SET(PCRE2_HEAP_LIMIT "20000000")
 SET(PCRE2_MATCH_LIMIT "10000000")
 SET(PCRE2_MATCH_LIMIT_DEPTH "MATCH_LIMIT")
+set(PCRE2_MAX_VARLOOKBEHIND "255" CACHE STRING "Default limit on variable lookbehinds.")
 
 SET(SUPPORT_PCRE2_16 1)
 
@@ -100,10 +99,12 @@ SET(PCRE2_HEADERS ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/pcre2.h)
 SET(SOURCES
     ${PROJECT_NAME}/src/pcre2_auto_possess.c
     ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}/pcre2_chartables.c
+    ${PROJECT_NAME}/src/pcre2_chkdint.c
     ${PROJECT_NAME}/src/pcre2_compile.c
     ${PROJECT_NAME}/src/pcre2_config.c
     ${PROJECT_NAME}/src/pcre2_context.c
     ${PROJECT_NAME}/src/pcre2_convert.c
+    ${PROJECT_NAME}/src/pcre2_compile_class.c
     ${PROJECT_NAME}/src/pcre2_dfa_match.c
     ${PROJECT_NAME}/src/pcre2_error.c
     ${PROJECT_NAME}/src/pcre2_extuni.c
@@ -122,11 +123,12 @@ SET(SOURCES
     ${PROJECT_NAME}/src/pcre2_substitute.c
     ${PROJECT_NAME}/src/pcre2_substring.c
     ${PROJECT_NAME}/src/pcre2_tables.c
+    ${PROJECT_NAME}/src/pcre2_chartables.c
     ${PROJECT_NAME}/src/pcre2_ucd.c
     ${PROJECT_NAME}/src/pcre2_valid_utf.c
     ${PROJECT_NAME}/src/pcre2_xclass.c
 )
-
+    
 add_library(${PROJECT_NAME}-16 ${SOURCES})
 target_include_directories(${PROJECT_NAME}-16 PUBLIC
     ${CMAKE_CURRENT_BINARY_DIR}/${PROJECT_NAME}

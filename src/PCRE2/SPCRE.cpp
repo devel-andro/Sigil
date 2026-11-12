@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2021  Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2021-2025  Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2011  John Schember <john@nachtimwald.com>
 **
 **  This file is part of Sigil.
@@ -19,10 +19,18 @@
 **  along with Sigil.  If not, see <http://www.gnu.org/licenses/>.
 **
 *************************************************************************/
+#include "EmbedPython/PyObjectPtr.h"
+#include "EmbedPython/PythonRoutines.h"
+#include <QString>
+// #include <QDebug>
 
 #include "PCRE2/SPCRE.h"
 #include "PCRE2/PCREReplaceTextBuilder.h"
+#include "Misc/Utility.h"
+#include "Misc/SearchUtils.h"
 #include "sigil_constants.h"
+
+#define PCRE_NO_JIT 1
 
 // The maximum number of catpures that we will allow.
 const int PCRE_MAX_CAPTURE_GROUPS = 30;
@@ -62,7 +70,7 @@ SPCRE::SPCRE(const QString &patten)
         }
 #endif
 
-        // Store the number of capture subpatterns.
+        // Store the number of capture patterns (pairs).
         // pcre2_pattern_info_16(m_re, PCRE2_INFO_CAPTURECOUNT, &m_captureSubpatternCount);
         m_captureSubpatternCount = pcre2_get_ovector_count_16(m_matchdata);
     }
@@ -71,8 +79,12 @@ SPCRE::SPCRE(const QString &patten)
         m_valid = false;
         PCRE2_UCHAR16 buffer[256];
         pcre2_get_error_message_16(errorno, buffer, sizeof(buffer));
-        m_error = QString::fromUtf16(buffer);
-        m_errpos = erroroffset;
+        m_error = QString::fromUtf16(reinterpret_cast<char16_t*>(buffer));
+        m_errpos = (int) erroroffset;
+        // qDebug() << "SPCRE invalid pattern: " << m_pattern;
+        // qDebug() << "SPCRE error: " << m_error;
+        // qDebug() << "SPCRE error position: " << m_errpos;
+
     }
 }
 
@@ -165,11 +177,7 @@ QList<SPCRE::MatchInfo> SPCRE::getEveryMatchInfo(const QString &text)
 
     int rc = 0;
 
-    PCRE2_SIZE * ovector = pcre2_get_ovector_pointer_16(m_matchdata);
-
-    // need to guard against patterns such as /(?=.\K)/ that use \K in an assertion
-    // to set the strt of a match later than its end    
-    if (ovector[0] > ovector[1]) return info;
+    PCRE2_SIZE * ovector = NULL;
 
     // Set the size of the array based on the number of capture subpatterns
     // if it does not exceed our maximum size.
@@ -181,22 +189,28 @@ QList<SPCRE::MatchInfo> SPCRE::getEveryMatchInfo(const QString &text)
 
     // We keep track of the last offsets as we move though the string matching
     // sub strings.
-    int last_offset[2] = {0};
-
+    unsigned int last_offset[2] = {0};
+    bool done = false;
+    
     // Run until no matches are found.
     do {
-        // Store the matching offsets so we can tell when we need to quit this
-        // loop.
-        last_offset[0] = ovector[0];
-        last_offset[1] = ovector[1];
 
-        // We only care about matches that have text in it.
-        if (last_offset[0] != last_offset[1]) {
-            // Add the matched information to the list.
+        rc = pcre2_match_16(m_re, text.utf16(), text.length(), last_offset[1], PCRE2_NOTEMPTY, m_matchdata, m_mcontext);
+
+        // NOTE: until a call to pcre2_match_16 happens even through m_matchdata exists
+        // and the ovector count is known, the pcre2_get_ovector_pointer returns a pointer
+        // to invalid ovector data
+        ovector = pcre2_get_ovector_pointer_16(m_matchdata);
+
+        done = (ovector[1] == last_offset[1]) || (ovector[0] >= ovector[1]);
+
+        last_offset[0] = (unsigned int)ovector[0];
+        last_offset[1] = (unsigned int)ovector[1];
+
+        if (rc >= 0 && ovector[0] != ovector[1] && ovector[0] < ovector[1]) {
             info.append(generateMatchInfo(ovector, ovector_count));
         }
-        rc = pcre2_match_16(m_re, text.utf16(), text.length(), last_offset[1], 0, m_matchdata, m_mcontext);
-    } while (rc >= 0 && ovector[0] != ovector[1] && ovector[1] != last_offset[1] && ovector[0] < ovector[1]);
+    } while (rc >= 0 && !done);
     
     return info;
 }
@@ -227,7 +241,7 @@ SPCRE::MatchInfo SPCRE::getFirstMatchInfo(const QString &text)
     // MSVC doesn't support it.
     // int *ovector = new int[ovector_size];
     // memset(ovector, 0, sizeof(int)*ovector_size);
-    rc = pcre2_match_16(m_re, text.utf16(), text.length(), 0, 0, m_matchdata, m_mcontext);
+    rc = pcre2_match_16(m_re, text.utf16(), text.length(), 0, PCRE2_NOTEMPTY, m_matchdata, m_mcontext);
     PCRE2_SIZE * ovector = pcre2_get_ovector_pointer_16(m_matchdata);
 
     if (rc >= 0 && ovector[0] != ovector[1]) {
@@ -249,31 +263,59 @@ SPCRE::MatchInfo SPCRE::getLastMatchInfo(const QString &text)
     }
 }
 
-bool SPCRE::replaceText(const QString &text, const QList<std::pair<int, int>> &capture_groups_offsets, const QString &replacement_pattern, QString &out)
+bool SPCRE::replaceText(const QString &text, const QList<std::pair<int, int>> &capture_groups_offsets,
+                        const QString &replacement_pattern, QString &out)
 {
-    PCREReplaceTextBuilder builder;
-    return builder.BuildReplacementText(*this, text, capture_groups_offsets, replacement_pattern, out);
+    QString functionname;
+    QString rname = replacement_pattern.trimmed();
+    if (rname.startsWith("\\F<") && rname.endsWith(">")) {
+        rname = rname.mid(3,-1);
+        rname.chop(1);
+        functionname = rname;
+    }
+    if (functionname.isEmpty() ) {
+        PCREReplaceTextBuilder builder;
+        return builder.BuildReplacementText(*this, text, capture_groups_offsets, replacement_pattern, out);
+    }
+    if (!isValid()) return false;
+    QList<std::pair<int, int> > fixed_groups = SearchUtils::ConvertCaptureGroupstoUTF32(text, capture_groups_offsets);
+    PythonRoutines pr;
+    PyObjectPtr fsp = pr.SetupInitialFunctionSearchEnvInPython(functionname);
+    out = pr.GetSingleReplacementByFunction(fsp, "", text, fixed_groups);
+    return true;
 }
 
-SPCRE::MatchInfo SPCRE::generateMatchInfo(PCRE2_SIZE* ovector, int ovector_count)
+bool SPCRE::functionReplaceText(const QString &bookpath, const QString &text,
+                                const QList<std::pair<int, int>> &capture_groups_offsets,
+                                PyObjectPtr fsp, QString &out)
+{
+    if (!isValid()) return false;
+    QList<std::pair<int, int> > fixed_groups = SearchUtils::ConvertCaptureGroupstoUTF32(text, capture_groups_offsets);
+    PythonRoutines pr;
+    out = pr.GetSingleReplacementByFunction(fsp, bookpath, text, fixed_groups);
+    return true;
+}
+
+SPCRE::MatchInfo SPCRE::generateMatchInfo(PCRE2_SIZE* ovector, int capture_pattern_count)
 {
     MatchInfo match_info;
     // Store the offsets in the QString text that we are matching
     // against.
-    int match_start = ovector[0];
-    int match_end = ovector[1];
+    int match_start = (int) ovector[0];
+    int match_end = (int) ovector[1];
     match_info.offset = std::pair<int, int>(match_start, match_end);
     // We keep a list of the substrings within the matched string that
     // are captured by capture patterns.
+    // The capture_pattern_count is the number of begin, end pairs in the ovector
     //
     // The first match is always the string itself.
     match_info.capture_groups_offsets.append(std::pair<int, int>(0, match_end - match_start));
 
     // Translate the subpattern offsets into locations within the
     // matched substring.
-    for (int i = 1; i <= ovector_count; i++) {
-        int subpattern_start = ovector[2 * i] - match_start;
-        int subpattern_end = ovector[2 * i + 1] - match_start;
+    for (int i = 1; i < capture_pattern_count; i++) {
+        int subpattern_start = (int) (ovector[2 * i] - match_start);
+        int subpattern_end = (int) (ovector[2 * i + 1] - match_start);
         match_info.capture_groups_offsets.append(std::pair<int, int>(subpattern_start, subpattern_end));
     }
 

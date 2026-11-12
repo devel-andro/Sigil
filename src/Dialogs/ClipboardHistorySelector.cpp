@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2018, 2019 Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2018-2026 Kevin B. Hendricks, Stratford, Ontario, Canada
 **  Copyright (C) 2012 John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012 Dave Heiland
 **
@@ -48,6 +48,7 @@ ClipboardHistorySelector::ClipboardHistorySelector(QWidget *parent)
     m_savedHistory(false)
 {
     ui.setupUi(this);
+    setWindowFlags(windowFlags() | Qt::WindowMinimizeButtonHint); 
     ExtendUI();
     ReadSettings();
     ConnectSignalsToSlots();
@@ -112,6 +113,7 @@ void ClipboardHistorySelector::RestoreClipboardState()
 
 void ClipboardHistorySelector::SetupClipboardHistoryTable()
 {
+    ui.clipboardItemsTable->clear();
     ui.clipboardItemsTable->setRowCount(0);
     ui.clipboardItemsTable->setRowCount(m_ClipboardHistoryItems->count());
 
@@ -135,7 +137,7 @@ void ClipboardHistorySelector::SetupClipboardHistoryTable()
         QChar *uc = display_text.data();
 
         for (int i = 0; i < (int)text.length(); ++i) {
-            if ((uc[i] < 0x20 && uc[i] != 0x09)
+            if ((uc[i] < QChar(0x20) && uc[i] != QChar(0x09))
                 || uc[i] == QChar::LineSeparator
                 || uc[i] == QChar::ParagraphSeparator
                 || uc[i] == QChar::ObjectReplacementCharacter) {
@@ -161,63 +163,27 @@ void ClipboardHistorySelector::SetupClipboardHistoryTable()
     }
 }
 
-#if (QT_VERSION < QT_VERSION_CHECK(5,12,2))
-// This is only needed for Linux
-// See:  https://bugreports.qt.io/browse/QTBUG-44849
-void ClipboardHistorySelector::TakeOwnershipOfClip()
-{
-    QApplication::clipboard()->setMimeData(copyMimeData(m_lastclip), QClipboard::Clipboard);
-}
-
-// This is only needed for Linux
-// See:  https://bugreports.qt.io/browse/QTBUG-44849
-QMimeData *ClipboardHistorySelector::copyMimeData(const QMimeData *mimeReference)
-{
-    QMimeData *mimeCopy = new QMimeData();
-    foreach(QString format, mimeReference->formats()) {
-        // Retrieving data
-        QByteArray data = mimeReference->data(format);
-        // Checking for custom MIME types
-        if(format.startsWith("application/x-qt")) {
-            // Retrieving true format name
-            int indexBegin = format.indexOf('"') + 1;
-            int indexEnd = format.indexOf('"', indexBegin);
-            format = format.mid(indexBegin, indexEnd - indexBegin);
-        }
-        mimeCopy->setData(format, data);
-    }
-    return mimeCopy;
-}
-#endif
-
 void ClipboardHistorySelector::ClipboardChanged()
 {
     const QString text = QApplication::clipboard()->text();
-
     if (text.isEmpty()) {
         return;
     }
-
-// This is only needed for Linux
-// See:  https://bugreports.qt.io/browse/QTBUG-44849
-#if !defined(Q_OS_WIN32) && !defined(Q_OS_MAC) && (QT_VERSION < QT_VERSION_CHECK(5,12,2))
-    // if there is something on the clipboard make sure we own it
-    if (!QApplication::clipboard()->ownsClipboard()) {
-        m_lastclip = QApplication::clipboard()->mimeData(QClipboard::Clipboard);
-        QTimer::singleShot(50, this, SLOT(TakeOwnershipOfClip()));
-    }
-#endif
 
     int existing_index = m_ClipboardHistoryItems->indexOf(text);
 
     if (existing_index > 0) {
         m_ClipboardHistoryItems->move(existing_index, 0);
     } else if (existing_index < 0) {
+        
         m_ClipboardHistoryItems->insert(0, text);
 
         while (m_ClipboardHistoryItems->size() > CLIPBOARD_HISTORY_MAX) {
             m_ClipboardHistoryItems->removeLast();
         }
+    }
+    if (isVisible()) {
+        SetupClipboardHistoryTable();
     }
 }
 
@@ -274,7 +240,7 @@ bool ClipboardHistorySelector::eventFilter(QObject *obj, QEvent *event)
 
             if (row >= 0 && row < ui.clipboardItemsTable->rowCount()) {
                 ui.clipboardItemsTable->selectRow(row);
-                accept();
+                DoPaste();
                 return true;
             }
         }
@@ -284,16 +250,37 @@ bool ClipboardHistorySelector::eventFilter(QObject *obj, QEvent *event)
     return QDialog::eventFilter(obj, event);
 }
 
+void ClipboardHistorySelector::DoPaste()
+{
+    if (ui.clipboardItemsTable->rowCount() > 0) {
+        int selected_row = ui.clipboardItemsTable->currentRow();
+
+	if (selected_row >= 0) {
+            QTableWidgetItem *item = ui.clipboardItemsTable->item(selected_row, 1);
+            const QString text = item->data(Qt::UserRole).toString();
+            QApplication::clipboard()->setText(text);
+            emit PasteRequest(text);
+        } else {
+            // user does not have any rows selected - paste text currently on clipboard                                         
+            emit PasteRequest(QApplication::clipboard()->text());
+	}
+    }
+}
+
 void ClipboardHistorySelector::ClipboardItemDoubleClicked(QTableWidgetItem *item)
 {
-    accept();
+    DoPaste();
 }
 
 
-void ClipboardHistorySelector::buttonClicked(QAbstractButton * button)
+void ClipboardHistorySelector::buttonClicked(QAbstractButton * abutton)
 {
-    QDialogButtonBox::StandardButton standardButton = ui.buttonBox->standardButton(button);
-    // abort does an abort without cancelloing changes 
+    if (abutton == m_paste_button) {
+        DoPaste();
+        return;
+    }
+    QDialogButtonBox::StandardButton standardButton = ui.buttonBox->standardButton(abutton);
+    // abort does an abort without cancelling changes 
     if (standardButton == QDialogButtonBox::Abort) {
         m_savedHistory = true;
     }
@@ -302,6 +289,7 @@ void ClipboardHistorySelector::buttonClicked(QAbstractButton * button)
 
 void ClipboardHistorySelector::accept()
 {
+#if 0
     if (ui.clipboardItemsTable->rowCount() > 0) {
         int selected_row = ui.clipboardItemsTable->currentRow();
 
@@ -315,7 +303,7 @@ void ClipboardHistorySelector::accept()
             emit PasteRequest(QApplication::clipboard()->text());
         }
     }
-
+#endif
     WriteSettings();
     QDialog::accept();
 }
@@ -336,10 +324,11 @@ void ClipboardHistorySelector::reject()
 
 void ClipboardHistorySelector::ExtendUI()
 {
-    QPushButton *paste_button = ui.buttonBox->button(QDialogButtonBox::Ok);
-    paste_button->setText(tr("Paste"));
+    m_paste_button = ui.buttonBox->addButton(tr("Paste"), QDialogButtonBox::ActionRole);
     QPushButton *save_button = ui.buttonBox->button(QDialogButtonBox::Abort);
     save_button->setText(tr("Save"));
+    QPushButton * done_button = ui.buttonBox->button(QDialogButtonBox::Ok);
+    done_button->setText(tr("Done"));
     ui.clipboardItemsTable->installEventFilter(this);
     ui.clipboardItemsTable->setWordWrap(false);
     ui.clipboardItemsTable->horizontalHeader()->setStretchLastSection(true);

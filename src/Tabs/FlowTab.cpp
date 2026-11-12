@@ -1,10 +1,10 @@
 /************************************************************************
 **
-**  Copyright (C) 2016-2021  Kevin B Hendricks, Stratford, Ontario, Canada
-**  Copyright (C) 2012       John Schember <john@nachtimwald.com>
-**  Copyright (C) 2012       Dave Heiland
-**  Copyright (C) 2012       Grant Drake
-**  Copyright (C) 2009, 2010, 2011  Strahinja Markovic  <strahinja.markovic@gmail.com>
+**  Copyright (C) 2016-2026 Kevin B Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2012      John Schember <john@nachtimwald.com>
+**  Copyright (C) 2012      Dave Heiland
+**  Copyright (C) 2012      Grant Drake
+**  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
 **
@@ -26,7 +26,7 @@
 #include <QtCore/QTimer>
 #include <QtCore/QUrl>
 #include <QtWidgets/QApplication>
-#include <QtWidgets/QAction>
+#include <QAction>
 #include <QtWidgets/QDialog>
 #include <QtWidgets/QLayout>
 #include <QtPrintSupport/QPrinter>
@@ -71,14 +71,14 @@ FlowTab::FlowTab(HTMLResource *resource,
     m_defaultCaretLocationToTop(false),
     m_LastPosition(-1)
 {
-    // Loading a flow tab can take a while. We set the wait
-    // cursor and clear it at the end of the delayed initialization.
-    QApplication::setOverrideCursor(Qt::WaitCursor);
     CreateCodeViewIfRequired(false);
+    m_wCodeView->SetContentMediaType(resource->GetMediaType());
+    UpdateCodeViewBookPath();
     m_Layout->addWidget(m_wCodeView);
     LoadSettings();
     setFocusProxy(m_wCodeView);
     ConnectCodeViewSignalsToSlots();
+    connect(this,  SIGNAL(TabRenamed(ContentTab *)), this, SLOT(UpdateCodeViewBookPath()));
 
     // We perform delayed initialization after the widget is on
     // the screen. This way, the user perceives less load time.
@@ -102,7 +102,15 @@ FlowTab::~FlowTab()
     // from our underlying resource including Deleted and Modified as they no 
     // longer needs to be delivered
 
-    disconnect(this, 0, 0, 0);
+    // disconnect(this, 0, 0, 0);
+    // the above generates the following warning even when used in destructor?
+    //   Warning: QObject::disconnect: wildcard call disconnects from destroyed signal of FlowTab::unnamed
+    // so replace with individual signal disconnections
+    disconnect(this,  SIGNAL(LinkClicked(const QUrl &)), 0, 0);
+    disconnect(this,  SIGNAL(OldTabRequest(QString, HTMLResource *)), 0, 0);
+    disconnect(this,  SIGNAL(CentralTabRequest(ContentTab *)), 0, 0);
+    disconnect(this,  SIGNAL(DeleteMe(ContentTab *)), 0, 0);
+    disconnect(this,  SIGNAL(TabRenamed(ContentTab *)), 0, 0);
 
     if (!GetResourceWasDeleted()) {
         // was: disconnect(m_HTMLResource, SIGNAL(Modified()), this, SLOT(ResourceModified()));
@@ -120,16 +128,19 @@ FlowTab::~FlowTab()
 
 }
 
+void FlowTab::UpdateCodeViewBookPath()
+{
+    m_wCodeView->SetContentBookPath(m_HTMLResource->GetRelativePath());
+}
+
 void FlowTab::CreateCodeViewIfRequired(bool is_delayed_load)
 {
     if (m_wCodeView) {
         return;
     }
 
-    QApplication::setOverrideCursor(Qt::WaitCursor);
     m_wCodeView = new CodeViewEditor(CodeViewEditor::Highlight_XHTML, true, this);
     m_wCodeView->SetReformatHTMLEnabled(true);
-    // m_views->addWidget(m_wCodeView);
 
     if (is_delayed_load) {
         ConnectCodeViewSignalsToSlots();
@@ -140,8 +151,6 @@ void FlowTab::CreateCodeViewIfRequired(bool is_delayed_load)
         // Zoom assignment only works after the document has been loaded
         m_wCodeView->Zoom();
     }
-
-    QApplication::restoreOverrideCursor();
 }
 
 void FlowTab::DelayedInitialization()
@@ -170,8 +179,6 @@ void FlowTab::DelayedInitialization()
     // sync Preview to where CodeView is now
     emit ScrollPreviewImmediately();
 
-    // Cursor set in constructor
-    QApplication::restoreOverrideCursor();
 }
 
 bool FlowTab::IsLoadingFinished()
@@ -198,10 +205,8 @@ bool FlowTab::IsModified()
 
 void FlowTab::CodeView()
 {
-    QApplication::setOverrideCursor(Qt::WaitCursor);
     CreateCodeViewIfRequired();
     m_wCodeView->SetDelayedCursorScreenCenteringRequired();
-    setFocusProxy(m_wCodeView);
 
     // We will usually want focus in the tab, except when splitting opens this as a preceding tab.
     if (m_grabFocus) {
@@ -212,7 +217,14 @@ void FlowTab::CodeView()
 
     m_wCodeView->ExecuteCaretUpdate();
     
-    QApplication::restoreOverrideCursor();
+}
+
+void FlowTab::ThemeChangeRefresh()
+{
+    if (m_wCodeView) {
+        m_wCodeView->SetAppearance();
+        m_wCodeView->RehighlightDocument();
+    }
 }
 
 void FlowTab::LoadTabContent()
@@ -355,7 +367,7 @@ void FlowTab::EmitScrollPreviewImmediately()
 void FlowTab::EmitUpdateCursorPosition()
 {
     DBG qDebug() << "FlowTab emiting UpdateCursorPosition from EmitUpdateCursorPosition";
-    emit UpdateCursorPosition(GetCursorLine(), GetCursorColumn());
+    emit UpdateCursorPosition(GetCursorLine(), GetCursorColumn(), GetCursorCodepoint());
 }
 
 void FlowTab::HighlightWord(QString word, int pos)
@@ -453,6 +465,14 @@ bool FlowTab::InsertIdEnabled()
     return false;
 }
 
+bool FlowTab::InsertRoleEnabled()
+{
+    if (m_wCodeView) {
+        return m_wCodeView->IsInsertRoleAllowed();
+    }
+    return false;
+}
+
 bool FlowTab::InsertHyperlinkEnabled()
 {
     if (m_wCodeView) {
@@ -542,6 +562,14 @@ int FlowTab::GetCursorColumn() const
 {
     if (m_wCodeView) {
         return m_wCodeView->GetCursorColumn();
+    }
+    return -1;
+}
+
+int FlowTab::GetCursorCodepoint() const
+{
+    if (m_wCodeView) {
+        return m_wCodeView->GetCursorCodepoint();
     }
     return -1;
 }
@@ -716,7 +744,7 @@ void FlowTab::SplitSection()
     }
     HTMLResource * nav_resource = mainWindow->GetCurrentBook()->GetConstOPF()->GetNavResource();
     if (nav_resource && (nav_resource == m_HTMLResource)) {
-        Utility::DisplayStdErrorDialog("The Nav file can not be split");
+        Utility::DisplayStdErrorDialog("The Nav file cannot be split");
         return;
     }
 
@@ -744,7 +772,7 @@ void FlowTab::InsertSGFSectionMarker()
     }
     HTMLResource * nav_resource = mainWindow->GetCurrentBook()->GetConstOPF()->GetNavResource();
     if (nav_resource && (nav_resource == m_HTMLResource)) {
-        Utility::DisplayStdErrorDialog("The Nav file can not be split");
+        Utility::DisplayStdErrorDialog("The Nav file cannot be split");
         return;
     }
 
@@ -817,10 +845,26 @@ QString FlowTab::GetSelectedText()
     return "";
 }
 
+QString FlowTab::GetCurrentTag()
+{
+    if (m_wCodeView) {
+        return m_wCodeView->GetCurrentSingleOrOpenTagName();
+    } 
+    return "";
+}
+
 bool FlowTab::InsertId(const QString &id)
 {
     if (m_wCodeView) {
         return m_wCodeView->InsertId(id);
+    } 
+    return false;
+}
+
+bool FlowTab::InsertRole(const QString &role)
+{
+    if (m_wCodeView) {
+        return m_wCodeView->InsertRole(role);
     } 
     return false;
 }
@@ -1026,7 +1070,7 @@ void FlowTab::ChangeCasing(const Utility::Casing casing)
 void FlowTab::HeadingStyle(const QString &heading_type, bool preserve_attributes)
 {
     if (m_wCodeView) {
-        QChar last_char = heading_type[ heading_type.count() - 1 ];
+        QChar last_char = heading_type[ heading_type.length() - 1 ];
 
         // For heading_type == "Heading #"
         if (last_char.isDigit()) {
@@ -1122,6 +1166,14 @@ bool FlowTab::PasteClipNumber(int clip_number)
 {
     if (m_wCodeView) {
         return m_wCodeView->PasteClipNumber(clip_number);
+    }
+    return false;
+}
+
+bool FlowTab::PasteClipText(const QString& cliptext)
+{
+    if (m_wCodeView) {
+        return m_wCodeView->PasteClipText(cliptext);
     }
     return false;
 }

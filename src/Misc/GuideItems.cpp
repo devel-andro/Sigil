@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2016-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2016-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **
 **  This file is part of Sigil.
 **
@@ -30,18 +30,6 @@
 #include "Misc/UILanguage.h"
 #include "Misc/GuideItems.h"
 
-GuideItems *GuideItems::m_instance = 0;
-
-GuideItems *GuideItems::instance()
-{
-    if (m_instance == 0) {
-        m_instance = new GuideItems();
-    }
-
-    return m_instance;
-}
-
-
 GuideItems::GuideItems()
 {
     SetGuideItemsMap();
@@ -66,7 +54,7 @@ QString GuideItems::GetTitle(const QString &code, const QString &lang)
     // Note the book language may differ from the ui language
     bool translation_loaded = false;
     QTranslator bookTranslator;
-    const QString qm_name = QString("sigil_%1").arg(lang);
+    QString qm_name = QString("sigil_%1").arg(lang);
     // Run though all locations and stop once we find and are able to load
     // an appropriate translation.
     foreach(QString path, UILanguage::GetPossibleTranslationPaths()) {
@@ -78,12 +66,24 @@ QString GuideItems::GetTitle(const QString &code, const QString &lang)
             }
         }
     }
+    // try again with just the base part of the langcode before any "-"
+    if (!translation_loaded && lang.contains("-")) {
+        const QString langcut = lang.split("-").at(0);
+        qm_name = QString("sigil_%1").arg(langcut);
+        foreach(QString path, UILanguage::GetPossibleTranslationPaths()) {
+            if (QDir(path).exists()) {
+                if (bookTranslator.load(qm_name, path)) {
+                    translation_loaded = true;
+                    break;
+                }
+            }
+        }
+    }
     // if no translator matched, use the user interface language so that
     // the dev can fix them manually
     if (!translation_loaded) {
         return GetName(code);
     }
-    
     QString title = bookTranslator.translate("GuideItems", m_CodeToRawTitle[code].toUtf8().constData());
     if (title.isEmpty()) {
         title = bookTranslator.translate("Landmarks", m_CodeToRawTitle[code].toUtf8().constData());

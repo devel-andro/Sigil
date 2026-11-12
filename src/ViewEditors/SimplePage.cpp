@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2020 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2019-2024 Kevin B. Hendricks, Stratford Ontario Canada
 **
 **  This file is part of Sigil.
 **
@@ -18,15 +18,15 @@
 **  along with Sigil.  If not, see <http://www.gnu.org/licenses/>.
 **
 *************************************************************************/
-#include <QtWebEngineWidgets/QWebEnginePage>
 #include <QUrl>
+#include <QWebEngineProfile>
 #include <QDebug>
 #include "Misc/Utility.h"
 #include "ViewEditors/SimplePage.h"
 
  
-SimplePage::SimplePage(QObject *parent)
-    : QWebEnginePage(parent)
+SimplePage::SimplePage(QWebEngineProfile* profile, QObject *parent)
+    : QWebEnginePage(profile, parent)
 {
     setBackgroundColor(Utility::WebViewBackgroundColor(true));
     setUrl(QUrl("about:blank"));

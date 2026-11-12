@@ -1,6 +1,6 @@
 /****************************************************************************
 **
-**  Copyright (C) 2016-2021 Kevin B. Hendricks, Stratford, ON Canada
+**  Copyright (C) 2016-2026 Kevin B. Hendricks, Stratford, ON Canada
 **
 **  This file is part of Sigil.
 **
@@ -29,17 +29,24 @@
 #include <QDate>
 #include <QShortcut>
 #include <QInputDialog>
+#include <QTimer>
+#include <QContextMenuEvent>
+#include <QRegularExpression>
 #include <QDebug>
+#if QT_VERSION >= QT_VERSION_CHECK(6,5,0)
+#include <QTimeZone>
+#endif
 
 #include "Dialogs/TreeModel.h"
+#include "Dialogs/TreeItem.h"
 #include "Dialogs/AddMetadata.h"
 #include "MainUI/MainWindow.h"
 #include "Misc/Language.h"
 #include "Misc/MarcRelators.h"
 #include "Misc/SettingsStore.h"
+#include "Misc/Utility.h"
 #include "Dialogs/MetaEditorItemDelegate.h"
 #include "Dialogs/MetaEditor.h"
-
 
 static const QString SETTINGS_GROUP = "meta_editor";
 static const QString _IN = "  ";
@@ -47,18 +54,21 @@ static const QString _GS = QString(QChar(29)); // Ascii Group Separator
 static const QString _RS = QString(QChar(30)); // Ascii Record Separator
 static const QString _US = QString(QChar(31)); // Ascii Unit Separator
 
+static const QStringList KNOWN_EPUB2_OPF_SCHEMES = QStringList() << "MARC:RELATORS" << "DOI" << "ISBN" << "ISSN" << "UUID" << "AMAZON";
 
 MetaEditor::MetaEditor(QWidget *parent)
   : QDialog(parent),
     m_mainWindow(qobject_cast<MainWindow *>(parent)),
-    m_RemoveRow(new QShortcut(QKeySequence(Qt::ControlModifier + Qt::Key_Delete),this, 0, 0, Qt::WidgetWithChildrenShortcut)),
-    m_cbDelegate(new MetaEditorItemDelegate())
+    m_RemoveRow(new QShortcut(QKeySequence(Qt::ControlModifier | Qt::Key_Delete),this, 0, 0, Qt::WidgetWithChildrenShortcut)),
+    m_cbDelegate(new MetaEditorItemDelegate()),
+    m_ContextMenu(new QMenu(this))
 {
     setupUi(this);
-
+    CreateContextMenuActions();
     view->setTextElideMode(Qt::ElideNone);
     view->setUniformRowHeights(false);
     view->setWordWrap(true);
+    view->setContextMenuPolicy(Qt::CustomContextMenu);
     m_book = m_mainWindow->GetCurrentBook();
     m_version = m_book->GetConstOPF()->GetEpubVersion();
     m_opfdata = m_book->GetOPF()->GetText();
@@ -110,22 +120,40 @@ MetaEditor::MetaEditor(QWidget *parent)
             this, SLOT(updateActions()));
 
     connect(delButton, SIGNAL(clicked()), this, SLOT(removeRow()));
-    connect(tbMoveUp, SIGNAL(clicked()), this, SLOT(moveRowUp()));
-    connect(tbMoveDown, SIGNAL(clicked()), this, SLOT(moveRowDown()));
+    connect(m_Remove,  SIGNAL(triggered()), this, SLOT(removeRow()));
     connect(m_RemoveRow, SIGNAL(activated()), this, SLOT(removeRow()));
+    connect(tbMoveUp, SIGNAL(clicked()), this, SLOT(moveRowUp()));
+    connect(m_MoveUp,  SIGNAL(triggered()), this, SLOT(moveRowUp()));
+    connect(tbMoveDown, SIGNAL(clicked()), this, SLOT(moveRowDown()));
+    connect(m_MoveDown, SIGNAL(triggered()), this, SLOT(moveRowDown()));
 
     if (m_version.startsWith('3')) {
         connect(addMetaButton, SIGNAL(clicked()), this, SLOT(selectElement()));
+        connect(m_AddMetadata, SIGNAL(triggered()), this, SLOT(selectElement()));
         connect(addPropButton, SIGNAL(clicked()), this, SLOT(selectProperty()));
+        connect(m_AddProperty, SIGNAL(triggered()), this, SLOT(selectProperty()));
     } else {
         connect(addMetaButton, SIGNAL(clicked()), this, SLOT(selectE2Element()));
+        connect(m_AddMetadata, SIGNAL(triggered()), this, SLOT(selectE2Element()));
         connect(addPropButton, SIGNAL(clicked()), this, SLOT(selectE2Property()));
+        connect(m_AddProperty, SIGNAL(triggered()), this, SLOT(selectE2Property()));
     }
 
     connect(buttonBox, SIGNAL(accepted()), this, SLOT(saveData()));
     connect(buttonBox, SIGNAL(rejected()), this, SLOT(reject()));
-
+    connect(view, SIGNAL(customContextMenuRequested(const QPoint &)),
+            this, SLOT(OpenContextMenu(const QPoint &)));
     updateActions();
+    setFocusPolicy(Qt::TabFocus);
+    view->setFocusPolicy(Qt::StrongFocus);
+    addMetaButton->setFocusPolicy(Qt::TabFocus);
+    addPropButton->setFocusPolicy(Qt::TabFocus);
+    delButton->setFocusPolicy(Qt::TabFocus);
+    tbMoveUp->setFocusPolicy(Qt::TabFocus);
+    tbMoveDown->setFocusPolicy(Qt::TabFocus);
+    buttonBox->setFocusPolicy(Qt::TabFocus);
+
+    QTimer::singleShot(0, this, SLOT(MakeDefaultFirstSelection()));
 }
 
 
@@ -136,6 +164,45 @@ MetaEditor::~MetaEditor()
         delete m_cbDelegate;
         m_cbDelegate = 0;
     }
+}
+
+
+void MetaEditor::CreateContextMenuActions()
+{
+    m_AddMetadata = new QAction(tr("Add Metadata element"), this);
+    m_AddProperty = new QAction(tr("Add Property to element"), this);
+    m_Remove      = new QAction(tr("Remove row"), this);
+    m_MoveUp      = new QAction(tr("Move row up"), this);
+    m_MoveDown    = new QAction(tr("Move row down"), this);
+}
+
+void MetaEditor::OpenContextMenu(const QPoint &point)
+{
+    SetupContextMenu(point);
+    m_ContextMenu->exec(view->viewport()->mapToGlobal(point));
+    if (!m_ContextMenu.isNull()) {
+        m_ContextMenu->clear();
+    }
+}
+
+
+void MetaEditor::SetupContextMenu(const QPoint &point)
+{
+    bool hasSelection = !view->selectionModel()->selection().isEmpty();
+    m_ContextMenu->addAction(m_AddMetadata);
+    m_AddMetadata->setEnabled(hasSelection);
+
+    m_ContextMenu->addAction(m_AddProperty);
+    m_AddProperty->setEnabled(hasSelection);
+
+    m_ContextMenu->addAction(m_Remove);
+    m_Remove->setEnabled(hasSelection);
+
+    m_ContextMenu->addAction(m_MoveUp);
+    m_MoveUp->setEnabled(hasSelection);
+
+    m_ContextMenu->addAction(m_MoveDown);
+    m_MoveDown->setEnabled(hasSelection);
 }
 
 
@@ -170,7 +237,7 @@ void MetaEditor::loadChoices()
     m_Choices[cat] = buildChoices(COLLECT);
 
     cat = PName("role");
-    QStringList rolenames = MarcRelators::instance()->GetSortedNames();
+    QStringList rolenames = MarcRelators::instance().GetSortedNames();
     QStringList  rchoices;
     foreach(QString aval, rolenames) {
         rchoices << aval + _GS + RCode(aval);
@@ -178,7 +245,7 @@ void MetaEditor::loadChoices()
     rchoices.sort();
     m_Choices[cat] = rchoices;
 
-    QStringList langnames = Language::instance()->GetSortedPrimaryLanguageNames();
+    QStringList langnames = Language::instance().GetSortedPrimaryLanguageNames();
     QStringList  lchoices;
     foreach(QString aval, langnames) {
         lchoices << aval + _GS + LCode(aval);
@@ -212,7 +279,7 @@ void MetaEditor::loadE2Choices()
     m_Choices[cat] = buildChoices(SCHEMES);
 
     cat = PName("opf:role");
-    QStringList rolenames = MarcRelators::instance()->GetSortedNames();
+    QStringList rolenames = MarcRelators::instance().GetSortedNames();
     QStringList  rchoices;
     foreach(QString aval, rolenames) {
         rchoices << aval + _GS + RCode(aval);
@@ -220,7 +287,7 @@ void MetaEditor::loadE2Choices()
     rchoices.sort();
     m_Choices[cat] = rchoices;
 
-    QStringList langnames = Language::instance()->GetSortedPrimaryLanguageNames();
+    QStringList langnames = Language::instance().GetSortedPrimaryLanguageNames();
     QStringList  lchoices;
     foreach(QString aval, langnames) {
         lchoices << aval + _GS + LCode(aval);
@@ -255,20 +322,27 @@ QString MetaEditor::GetOPFMetadata() {
         if (rc.startsWith(_IN)) {
             // treat as property value attribute pair
             QStringList parts = rc.trimmed().split(_US);
+            QString aprop = parts.at(0);
             QString tvalue = parts.at(1);
             QString value = parts.at(1);
-            if (parts.at(0) == "opf:role") value = RName(value);
-            if (parts.at(0) == "opf:scheme") value = PName(value);
-            if (parts.at(0) == "opf:file-as") tvalue = "";
-            if (parts.at(0) == "opf:event") value = PName("opf:event-" + value);
-            if (parts.at(0) == "role") value = RName(value);
-            if (parts.at(0) == "title-type") value = PName("title-type:" + value);
-            if (parts.at(0) == "collection-type") value = PName("collection-type:" + value);
-            if (parts.at(0) == "xml:lang") value = LName(value);
-            if (parts.at(0) == "altlang") value = LName(value);
-            if (parts.at(0) == "source-of") value = PName("source-of:" + value);
-            if (parts.at(0) == "dir") value = PName("dir:" + value);
-            QString prop = PName(parts.at(0)) + _GS + parts.at(0);
+            if (aprop == "opf:role") value = RName(value);
+            if (aprop == "opf:scheme") {
+                if (!KNOWN_EPUB2_OPF_SCHEMES.contains(value.toUpper())) {
+                    aprop = "opf:scheme-custom";
+                } else {
+                    value = PName(value);
+                }
+            }
+            if (aprop == "opf:file-as") tvalue = "";
+            if (aprop == "opf:event") value = PName("opf:event-" + value);
+            if (aprop == "role") value = RName(value);
+            if (aprop == "title-type") value = PName("title-type:" + value);
+            if (aprop == "collection-type") value = PName("collection-type:" + value);
+            if (aprop == "xml:lang") value = LName(value);
+            if (aprop == "altlang") value = LName(value);
+            if (aprop == "source-of") value = PName("source-of:" + value);
+            if (aprop == "dir") value = PName("dir:" + value);
+            QString prop = PName(aprop) + _GS + aprop;
             value = value + _GS + tvalue;
             nlist.append(_IN + prop + _US + value + _RS);
         } else {
@@ -295,7 +369,7 @@ QString MetaEditor::SetNewOPFMetadata(QString& data)
     QString newopfdata = m_opfdata;
     MetadataPieces mdp;
     // Translate from Human Readable Form
-    QStringList dlist = data.split(_RS);
+    QStringList dlist = data.split(_RS, Qt::SkipEmptyParts);
     QStringList nlist;
     foreach(QString rc, dlist) {
         if (rc.startsWith(_IN)) {
@@ -303,6 +377,7 @@ QString MetaEditor::SetNewOPFMetadata(QString& data)
             QStringList parts = rc.trimmed().split(_US);
             QString prop = PCode(parts.at(0));
             QString value = parts.at(1);
+            if (prop == "opf:scheme-custom") prop = "opf:scheme";
             if (prop == "opf:role") value = RCode(value);
             if (prop == "opf:scheme") value = PCode(value);
             if (prop == "opf:event") {
@@ -355,6 +430,18 @@ QString MetaEditor::SetNewOPFMetadata(QString& data)
     return newopfdata;
 }
 
+void MetaEditor::MakeDefaultFirstSelection()
+{
+    TreeModel * treemodel = qobject_cast<TreeModel *>(view->model());
+    if (treemodel) {
+        TreeItem *root_item = treemodel->getRootItem();
+        // Set the default to the first item
+        if (root_item->childCount() > 0) {
+            view->selectionModel()->select(view->model()->index(0,0, QModelIndex()), QItemSelectionModel::ClearAndSelect);
+        }
+    }
+}
+
 //Quick Utility Conversion from Element Code to Name
 const QString MetaEditor::EName(const QString& code)
 {
@@ -386,11 +473,11 @@ const QString MetaEditor::PCode  (const QString& name)
     return name;
 }
 
-const QString MetaEditor::LName  (const QString& code) { return Language::instance()->GetLanguageName(code); }
-const QString MetaEditor::LCode  (const QString& name) { return Language::instance()->GetLanguageCode(name); }
+const QString MetaEditor::LName  (const QString& code) { return Language::instance().GetLanguageName(code, code); }
+const QString MetaEditor::LCode  (const QString& name) { return Language::instance().GetLanguageCode(name, name); }
 
-const QString MetaEditor::RName  (const QString& code) { return MarcRelators::instance()->GetName(code);     }
-const QString MetaEditor::RCode  (const QString& name) { return MarcRelators::instance()->GetCode(name);     }
+const QString MetaEditor::RName  (const QString& code) { return MarcRelators::instance().GetName(code);     }
+const QString MetaEditor::RCode  (const QString& name) { return MarcRelators::instance().GetCode(name);     }
 
 
 
@@ -400,7 +487,8 @@ void MetaEditor::selectElement()
 {
     QStringList codes;
     {
-         AddMetadata addelement(m_ElementInfo, this);
+         QString title = tr("Add Metadata Element");
+         AddMetadata addelement(title, m_ElementInfo, this);
          if (addelement.exec() == QDialog::Accepted) {
             codes = addelement.GetSelectedEntries();
          }
@@ -408,7 +496,8 @@ void MetaEditor::selectElement()
     foreach(QString code, codes) {
         if (code == "dc:language") {
             QStringList langcodes;
-            AddMetadata addvalue(Language::instance()->GetLangMap(), this);
+            QString title = tr("Select Language");
+            AddMetadata addvalue(title, Language::instance().GetLangMap(), this);
             if (addvalue.exec() == QDialog::Accepted) {
                  langcodes = addvalue.GetSelectedEntries();
             }
@@ -437,12 +526,20 @@ void MetaEditor::selectElement()
             QString content = "urn:AMAZON:" + tr("[Amazon ASIN here]");
             code = "dc:identifier";
             insertRow(EName(code), code, content, "");
+        } else if (code == "dc:identifier-custom") {
+            QString content = tr("[Custom identifier here]");
+            code = "dc:identifier";
+            insertRow(EName(code), code, content, "");
         } else if ((code == "dc:date") || (code == "dcterms:created")) {
             QString content = QDate::currentDate().toString(Qt::ISODate);
             insertRow(EName(code), code, content, "");
         } else if (code == "dcterms:modified") {
             QDateTime zt(QDateTime::currentDateTime());
+#if QT_VERSION >= QT_VERSION_CHECK(6,5,0)
+	    zt.setTimeZone(QTimeZone::UTC);
+#else
             zt.setTimeSpec(Qt::UTC);
+#endif
             QString content = zt.toString(Qt::ISODate);
             insertRow(EName(code), code, content, "");
         } else if (code == "dc:type") {
@@ -469,9 +566,18 @@ void MetaEditor::selectElement()
             insertChild(PName("property"),"property", "[name]", "");
         } else if (code == "custom-element") {
             QString custom_element = getInput(tr("Custom Element"),tr("Custom Element"), tr("[Custom element]"));
-            QString content = tr("[Value here]");
-            insertRow(custom_element, custom_element, content, "");
-        } else {
+            custom_element = custom_element.trimmed();
+            QRegularExpression valid_xml_name(
+                "^(?![Xx][Mm][Ll])([A-Za-z_][A-Za-z0-9._-]*)(:([A-Za-z_][A-Za-z0-9._-]*))?$"
+            );
+            bool valid = valid_xml_name.match(custom_element).hasMatch();
+            if (valid) {
+                QString content = tr("[Value here]");
+                insertRow(custom_element, custom_element, content, "");
+            } else {
+                Utility::warning(this, tr("Invalid characters were detected in the element name"), tr("Invalid XML element name."), QMessageBox::Ok);
+            }
+		} else {
             insertRow(EName(code), code, "", "");
         }
     }
@@ -481,7 +587,8 @@ void MetaEditor::selectE2Element()
 {
     QStringList codes;
     {
-         AddMetadata addelement(m_ElementInfo, this);
+         QString title = tr("Add Metadata Element");
+         AddMetadata addelement(title, m_ElementInfo, this);
          if (addelement.exec() == QDialog::Accepted) {
             codes = addelement.GetSelectedEntries();
          }
@@ -489,7 +596,8 @@ void MetaEditor::selectE2Element()
     foreach(QString code, codes) {
         if (code == "dc:language") {
             QStringList langcodes;
-            AddMetadata addvalue(Language::instance()->GetLangMap(), this);
+            QString title = tr("Select Language");
+            AddMetadata addvalue(title, Language::instance().GetLangMap(), this);
             if (addvalue.exec() == QDialog::Accepted) {
                  langcodes = addvalue.GetSelectedEntries();
             }
@@ -527,7 +635,7 @@ void MetaEditor::selectE2Element()
             QString content = tr("[Custom identifier here]");
             code = "dc:identifier";
             insertRow(EName(code), code, content, "");
-            insertChild(PName("opf:scheme"), "opf:scheme", "", "");
+            insertChild(PName("opf:scheme-custom"), "opf:scheme", "", "");
         } else if (code.startsWith("dc:date-")) {
             QStringList parts = code.split('-');
             QString event = parts.at(1);
@@ -539,7 +647,7 @@ void MetaEditor::selectE2Element()
             code = "dc:creator";
             QString content = tr("[Author name here]");
             insertRow(EName(code), code, content, "");
-            insertChild(PName("opf:role"),"opf:role", LName("aut"), "aut");
+            insertChild(PName("opf:role"),"opf:role", RName("aut"), "aut");
         } else if (code == "dc:creator") {
             code = "dc:creator";
             QString content = tr("[Creator name here]");
@@ -563,7 +671,8 @@ void MetaEditor::selectProperty()
 {
     QStringList codes;
     {
-        AddMetadata addproperty(m_PropertyInfo, this);
+        QString title = tr("Add Property to Element");
+        AddMetadata addproperty(title, m_PropertyInfo, this);
         if (addproperty.exec() == QDialog::Accepted) {
             codes = addproperty.GetSelectedEntries();
         }
@@ -595,7 +704,8 @@ void MetaEditor::selectProperty()
         } else if (code == "alternate-script") {
                 insertChild(PName(code), code, "", "");
                 QStringList langcodes;
-                AddMetadata addvalue(Language::instance()->GetLangMap(), this);
+                QString title = tr("Select Language");
+                AddMetadata addvalue(title, Language::instance().GetLangMap(), this);
                 if (addvalue.exec() == QDialog::Accepted) {
                     langcodes = addvalue.GetSelectedEntries();
                 }
@@ -607,7 +717,8 @@ void MetaEditor::selectProperty()
                 insertChild(PName(code), code, LName(lang), lang);
         } else if ((code == "xml:lang") || (code == "altlang")) {
             QStringList langcodes;
-            AddMetadata addvalue(Language::instance()->GetLangMap(), this);
+            QString title = tr("Select Language");
+            AddMetadata addvalue(title, Language::instance().GetLangMap(), this);
             if (addvalue.exec() == QDialog::Accepted) {
                 langcodes = addvalue.GetSelectedEntries();
             }
@@ -618,7 +729,8 @@ void MetaEditor::selectProperty()
             insertChild(PName(code), code, LName(lang), lang);
         } else if (code == "role") {
             QStringList rolecodes;
-            AddMetadata addrole(MarcRelators::instance()->GetCodeMap(), this);
+            QString title = tr("Select Role");
+            AddMetadata addrole(title, MarcRelators::instance().GetCodeMap(), this);
             if (addrole.exec() == QDialog::Accepted) {
                 rolecodes = addrole.GetSelectedEntries();
             }
@@ -648,7 +760,8 @@ void MetaEditor::selectE2Property()
 {
     QStringList codes;
     {
-        AddMetadata addproperty(m_PropertyInfo, this);
+        QString	title =	tr("Add Propety to Element");
+        AddMetadata addproperty(title, m_PropertyInfo, this);
         if (addproperty.exec() == QDialog::Accepted) {
             codes = addproperty.GetSelectedEntries();
         }
@@ -658,7 +771,8 @@ void MetaEditor::selectE2Property()
             insertChild(PName(code), code, "", "");
         } else if (code == "xml:lang") {
             QStringList langcodes;
-            AddMetadata addvalue(Language::instance()->GetLangMap(), this);
+            QString title = tr("Select Language");
+            AddMetadata addvalue(title, Language::instance().GetLangMap(), this);
             if (addvalue.exec() == QDialog::Accepted) {
                 langcodes = addvalue.GetSelectedEntries();
             }
@@ -669,7 +783,8 @@ void MetaEditor::selectE2Property()
             insertChild(PName(code), code, LName(lang), lang);
         } else if (code == "opf:role") {
             QStringList rolecodes;
-            AddMetadata addrole(MarcRelators::instance()->GetCodeMap(), this);
+            QString title = tr("Select Role");
+            AddMetadata addrole(title, MarcRelators::instance().GetCodeMap(), this);
             if (addrole.exec() == QDialog::Accepted) {
                 rolecodes = addrole.GetSelectedEntries();
             }
@@ -869,7 +984,7 @@ void MetaEditor::loadMetadataElements()
          tr("Custom Element") << "custom-element" << tr("An empty metadata element you can modify.")  << 
          tr("Meta Element (primary)") << "meta" << tr("An empty primary metadata element you can modify.");
     for (int i = 0; i < data.count(); i++) {
-        QString name = data.at(i++);
+        QString name = data.at(i++).trimmed();
         QString code = data.at(i++);
         QString description = data.at(i);
         DescriptiveInfo minfo;
@@ -917,7 +1032,7 @@ void MetaEditor::loadMetadataProperties()
         tr("Custom Property") << "custom-property" << tr("An empty metadata property or attribute you can modify.");
 
     for (int i = 0; i < data.count(); i++) {
-        QString name = data.at(i++);
+        QString name = data.at(i++).trimmed();
         QString code = data.at(i++);
         QString description = data.at(i);
         DescriptiveInfo minfo;
@@ -947,7 +1062,7 @@ void MetaEditor::loadMetadataXProperties()
         tr("Collection Type") << "collection-type" << tr("Property used with belongs-to-collection. Indicates the form or nature of a collection.") <<
         tr("Source of") << "source-of" << tr("Indicates a unique aspect of an adapted source resource that has been retained in the given Rendition of the EPUB Publication.");
     for (int i = 0; i < data.count(); i++) {
-        QString name = data.at(i++);
+        QString name = data.at(i++).trimmed();
         QString code = data.at(i++);
         QString description = data.at(i);
         DescriptiveInfo minfo;
@@ -982,7 +1097,7 @@ void MetaEditor::loadE2MetadataXProperties()
         tr("Universally Unique Identifier") << "UUID"  << tr("Identifier Scheme: Universally Unique Identifier") <<
         tr("Amazon Unique Identifier") <<  "AMAZON" << tr("Identifier Scheme: Amazon Unique Identifier");
     for (int i = 0; i < data.count(); i++) {
-        QString name = data.at(i++);
+        QString name = data.at(i++).trimmed();
         QString code = data.at(i++);
         QString description = data.at(i);
         DescriptiveInfo minfo;
@@ -1038,7 +1153,7 @@ void MetaEditor::loadE2MetadataElements()
          tr("Custom Element") << "custom-element" << tr("An empty element for you to modify");
 
     for (int i = 0; i < data.count(); i++) {
-        QString name = data.at(i++);
+        QString name = data.at(i++).trimmed();
         QString code = data.at(i++);
         QString description = data.at(i);
         DescriptiveInfo meta;
@@ -1067,11 +1182,12 @@ void MetaEditor::loadE2MetadataProperties()
          tr("File As") << "opf:file-as" << tr("Provides the normalized form of the associated property for sorting. Typically used with author, creator, and contributor names.") <<
          tr("Role") << "opf:role" << tr("Describes the nature of work performed by a creator or contributor (e.g., that the person is the author or editor of a work).  Typically used with the marc:relators scheme for a controlled vocabulary.") <<
          tr("Scheme") << "opf:scheme" << tr("This attribute is typically added to dc:identifier to indicate the type of identifier being used: DOI, ISBN, ISSN, UUID, or AMAZON.") <<
+         tr("Custom Scheme") << "opf:scheme-custom" << tr("This attribute is typically added to dc:identifier to indicate that a custom identifier scheme is being used.") <<
          tr("Event") << "opf:event" << tr("This attribute is typically added to dc:date elements to specify the date type: publication, creation, or modification.") <<
          tr("Custom Attribute") << "custom-property" << tr("An empty metadata attribute you can modify.");
 
     for (int i = 0; i < data.count(); i++) {
-        QString name = data.at(i++);
+        QString name = data.at(i++).trimmed();
         QString code = data.at(i++);
         QString description = data.at(i);
         DescriptiveInfo minfo;

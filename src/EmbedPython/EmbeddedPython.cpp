@@ -1,6 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021  Kevin Hendricks
+**  Copyright (C) 2015-2026  Kevin Hendricks
+**  Copyright (C) 2015-2025  Doug Massay
 **  Copyright (C) 2015       John Schember <john@nachtimwald.com>
 **
 **  This file is part of Sigil.
@@ -26,11 +27,16 @@
 #include <QList>
 #include <QStringList>
 #include <QVariant>
+#include <QVariantList>
 #include <QMetaType>
 #include <QStandardPaths>
 #include <QDir>
+#include <QDebug>
+
 #include "Misc/Utility.h"
 #include "sigil_constants.h"
+
+#define DBG if(0)
 
 // IMPORTANT NOTE:  This interface does NOT support passing/converting the type bool
 // All bool values should be converted to integeres with values of 0 for false and 1 for true
@@ -56,6 +62,7 @@
  * QMetaType::UChar           37    unsigned char
  * QMetaType::Float           38    float
  * QMetaType::QVariant        41    QVariant
+ * QMetaType::QVariantPair    58    QVariantPair (std:pair<>)
  * QMetaType::QVariantList     9    QVariantList
  * QMetaType::QStringList     11    QStringList
  * QMetaType::QVariantMap      8    QVariantMap
@@ -164,90 +171,137 @@
 
 QMutex EmbeddedPython::m_mutex;
 
-EmbeddedPython* EmbeddedPython::m_instance = 0;
 int EmbeddedPython::m_pyobjmetaid = 0;
 int EmbeddedPython::m_listintmetaid = 0;
-PyThreadState * EmbeddedPython::m_threadstate = NULL;
+int EmbeddedPython::m_stdpairintintmetaid = 0;
 
-EmbeddedPython* EmbeddedPython::instance()
-{
-    if (m_instance == 0) {
-        m_instance = new EmbeddedPython();
-    }
-    return m_instance;
-}
+PyThreadState * EmbeddedPython::m_threadstate = NULL;
 
 EmbeddedPython::EmbeddedPython()
 {
-    // Build string list of paths that will
-    // comprise the embedded Python's sys.path
+
+    // Use new Python PyConfig and init routines
+    PyStatus status;
+    PyConfig config;
+
 #if defined(BUNDLING_PYTHON)
-    // Apple for Python 3.8 does need to set these now
+    // initialize to be embedded (isolated)
+    PyConfig_InitIsolatedConfig(&config);
+#if !defined(Q_OS_WIN32) && !defined(Q_OS_MAC)
+    if (APPIMAGE_BUILD) {
+        QString interppath = QCoreApplication::applicationDirPath() + "/python3";
+        PyConfig_SetString(&config, &config.executable, interppath.toStdWString().c_str());
+    }
+#endif // !defined(Q_OS_WIN32) && !defined(Q_OS_MAC)
+#else
+    // Linux, NetBSD, and everyone else (no Bundling)
+#if defined(LINUX_VIRT_PY)
+    // virt_python_bin is an extern const QString from constants.cpp
+    if (!virt_python_bin.isEmpty()) {
+        PyConfig_InitIsolatedConfig(&config);
+        PyConfig_SetString(&config, &config.executable, virt_python_bin.toStdWString().c_str());
+    } else {
+        PyConfig_InitPythonConfig(&config);
+    }
+#else
+    PyConfig_InitPythonConfig(&config);
+#endif // defined(LINUX_VIRT_PY)
+#endif // defined(BUNDLING_PYTHON)
+
+    //From https://github.com/python/cpython/blob/main/Python/initconfig.c
+    // Isolated Config is equivalent to
+    //    config->_config_init = (int)_PyConfig_INIT_ISOLATED;
+    //    config->isolated = 1;
+    //    config->use_environment = 0;
+    //    config->user_site_directory = 0;
+    //    config->dev_mode = 0;
+    //    config->install_signal_handlers = 0;
+    //    config->use_hash_seed = 0;
+    //    config->faulthandler = 0;
+    //    config->tracemalloc = 0;
+    //    config->perf_profiling = 0;
+    //    config->int_max_str_digits = _PY_LONG_DEFAULT_MAX_STR_DIGITS;
+    //    config->safe_path = 1;
+    //    config->pathconfig_warnings = 0;
+    // #ifdef MS_WINDOWS
+    //    config->legacy_windows_stdio = 0;
+    // #endif
+
+    status = PyConfig_Read(&config);
+    if (PyStatus_Exception(status)) {
+        qDebug() << "EmbeddedPython constructor error: could not read the config";
+        qDebug() << QString(status.err_msg);
+        PyConfig_Clear(&config);
+        return;
+    }
+
+#if defined(BUNDLING_PYTHON)
+    config.write_bytecode = 0;
+    config.optimization_level = 2;
+    config.module_search_paths_set = 1;
+
 #if defined(__APPLE__)
     QDir exedir(QCoreApplication::applicationDirPath());
     exedir.cdUp();
     QString pyhomepath = exedir.absolutePath() + PYTHON_MAIN_PREFIX;
-    QString pylibpath = pyhomepath + PYTHON_LIB_PATH;
-    wchar_t *hpath = new wchar_t[pyhomepath.size()+1];
-    pyhomepath.toWCharArray(hpath);
-    hpath[pyhomepath.size()]=L'\0';
-    QString pysyspath = pylibpath;
     foreach (const QString &src_path, PYTHON_SYS_PATHS) {
-        pysyspath = pysyspath + PATH_LIST_DELIM + pylibpath + src_path;
+        QString pysyspath = pyhomepath + PYTHON_LIB_PATH + src_path;
+        status = PyWideStringList_Append(&config.module_search_paths, pysyspath.toStdWString().c_str());
+        if (PyStatus_Exception(status)) {
+            qDebug() << "EmbeddedPython constructor error: Could not set sys.path";
+            qDebug() << QString(status.err_msg);
+        }
     }
-    wchar_t *mpath = new wchar_t[pysyspath.size()+1];
-    pysyspath.toWCharArray(mpath);
-    mpath[pysyspath.size()]=L'\0';
-    delete[] hpath;
-
-    // Py_OptimizeFlag = 2;
-    // Py_NoSiteFlag = 1;
-    
-#else // Windows
+#elif defined(Q_OS_WIN32) // Windows
     QString pyhomepath = QCoreApplication::applicationDirPath();
-    wchar_t *hpath = new wchar_t[pyhomepath.size()+1];
-    pyhomepath.toWCharArray(hpath);
-    hpath[pyhomepath.size()]=L'\0';
-
-    QString pysyspath = pyhomepath + PYTHON_MAIN_PATH;
     foreach (const QString &src_path, PYTHON_SYS_PATHS) {
-        pysyspath = pysyspath + PATH_LIST_DELIM + pyhomepath + PYTHON_MAIN_PATH + src_path;
+        QString pysyspath = pyhomepath + PYTHON_MAIN_PATH + src_path;
+        status = PyWideStringList_Append(&config.module_search_paths, pysyspath.toStdWString().c_str());
+        if (PyStatus_Exception(status)) {
+            qDebug() << "EmbeddedPython constructor error: Could not set sys.path";
+            qDebug() << QString(status.err_msg);
+        }
     }
-    wchar_t *mpath = new wchar_t[pysyspath.size()+1];
-    pysyspath.toWCharArray(mpath);
-    mpath[pysyspath.size()]=L'\0';
-    delete[] hpath;
+#else // *nix
+    QDir exedir(QCoreApplication::applicationDirPath());
+    exedir.cdUp();
+    QString pyhomepath = exedir.absolutePath() + PYTHON_MAIN_PREFIX;
+    foreach (const QString &src_path, PYTHON_SYS_PATHS) {
+        QString pysyspath = pyhomepath + PYTHON_LIB_PATH + src_path;
+        status = PyWideStringList_Append(&config.module_search_paths, pysyspath.toStdWString().c_str());
+        if (PyStatus_Exception(status)) {
+            qDebug() << "EmbeddedPython constructor error: Could not set sys.path";
+            qDebug() << QString(status.err_msg);
+        }
+    }
+#endif
+    
+#endif  // BUNDLING PYTHON
+    
+    // Use new Python PyConfig and init routines
+    status = Py_InitializeFromConfig(&config);
+    if (PyStatus_Exception(status)) {
+        qDebug() << "EmbeddedPython constructor error: Could not initialize from config";
+        qDebug() << QString(status.err_msg);
+        PyConfig_Clear(&config);
+        return;
+    }
+    PyConfig_Clear(&config);
+    // Debug output for python paths
+    DBG PyRun_SimpleString("import sys; print(f'{sys.executable=}\\n{sys.prefix=}\\n{sys.exec_prefix=}\\n{sys.base_prefix=}\\n{sys.base_exec_prefix=}\\n{sys.path=}')");
 
-    Py_OptimizeFlag = 2;
-    Py_NoSiteFlag = 1;
-#endif // defined(__APPLE__)
-    // Everyone uses these flags when python is bundled.
-    Py_DontWriteBytecodeFlag = 1;
-    Py_IgnoreEnvironmentFlag = 1;
-    Py_NoUserSiteDirectory = 1;
-    //Py_DebugFlag = 0;
-    //Py_VerboseFlag = 0;
-    // Set before Py_Initialize to ensure isolation from system python
-    Py_SetPath(mpath);
-    delete[] mpath;
-#endif // defined(BUNDLING_PYTHON)
-
-    Py_Initialize();
-    PyEval_InitThreads();
     m_threadstate = PyEval_SaveThread();
     m_pyobjmetaid = qMetaTypeId<PyObjectPtr>();
     m_listintmetaid = qMetaTypeId<QList<int> >();
+    m_stdpairintintmetaid = qMetaTypeId<std::pair<int, int> >();
 }
 
 
 EmbeddedPython::~EmbeddedPython()
 {
-    if (m_instance) {
-        delete m_instance;
-        m_instance = 0;
-    }
     m_pyobjmetaid = 0;
     m_listintmetaid = 0;
+    m_stdpairintintmetaid = 0;
     PyEval_RestoreThread(m_threadstate);
     Py_Finalize();
 }
@@ -305,6 +359,22 @@ bool EmbeddedPython::addToPythonSysPath(const QString &mpath)
     PyGILState_Release(gstate);
     EmbeddedPython::m_mutex.unlock();
     return success;
+}
+
+void EmbeddedPython::setupRedirects()
+{
+    // Runs from main.cpp after python3lib is added to syspath
+    EmbeddedPython::m_mutex.lock();
+    PyGILState_STATE gstate = PyGILState_Ensure();
+
+    // Automatically import the module into the C layer
+    PyObject* my_module = PyImport_ImportModule("redirect_imports");
+    if (my_module == NULL) {
+        qDebug() << "redirect re to regex failed\n";
+    }
+    Py_XDECREF(my_module);
+    PyGILState_Release(gstate);
+    EmbeddedPython::m_mutex.unlock();
 }
 
 // run interpreter without initiating/locking/unlocking GIL 
@@ -478,15 +548,14 @@ QVariant EmbeddedPython::PyObjectToQVariant(PyObject *po, bool ret_python_object
 
         if (kind == PyUnicode_1BYTE_KIND) {
             // latin 1 according to PEP 393
-            res = QVariant(QString::fromLatin1(reinterpret_cast<const char *>PyUnicode_1BYTE_DATA(po), -1));
+            res = QVariant(QString::fromLatin1(reinterpret_cast<const char *>(PyUnicode_1BYTE_DATA(po)), -1));
 
         } else if (kind == PyUnicode_2BYTE_KIND) {
-            res = QVariant(QString::fromUtf16(PyUnicode_2BYTE_DATA(po), -1));
+            res = QVariant(QString::fromUtf16(reinterpret_cast<char16_t*>(PyUnicode_2BYTE_DATA(po)), -1));
 
         } else if (kind == PyUnicode_4BYTE_KIND) {
             // PyUnicode_4BYTE_KIND
-            res = QVariant(QString::fromUcs4(PyUnicode_4BYTE_DATA(po), -1));
-
+            res = QVariant(QString::fromUcs4(reinterpret_cast<char32_t*>(PyUnicode_4BYTE_DATA(po)), -1));
         } else {
             // convert to utf8 since not a known
             res = QVariant(QString::fromUtf8(PyUnicode_AsUTF8(po),-1));
@@ -524,7 +593,7 @@ PyObject* EmbeddedPython::QVariantToPyObject(const QVariant &v)
 {
     PyObject* value = NULL;
     bool      ok;
-    switch ((QMetaType::Type)v.type()) {
+    switch (v.typeId()) {
         case QMetaType::Double:
             value = Py_BuildValue("d", v.toDouble(&ok));
             break;
@@ -567,6 +636,17 @@ PyObject* EmbeddedPython::QVariantToPyObject(const QVariant &v)
                }
             }
             break;
+#if 0
+         // this does not seem to be well documented or implemented by Qt
+         case QMetaType::QVariantPair:
+            {
+              QVariantPair pi = v.value<QVariantPair>();
+              value = PyTuple_New(2);
+              PyTuple_SetItem(value, 0, QVariantToPyObject(pi.first));
+              PyTuple_SetItem(value, 1, QVariantToPyObject(pi.second));
+            }
+            break;
+#endif
          case QMetaType::QVariantList:
             {
               QVariantList vlist = v.toList();
@@ -580,24 +660,26 @@ PyObject* EmbeddedPython::QVariantToPyObject(const QVariant &v)
             break;
         default:
           {
-            if ((QMetaType::Type)v.type() >= QMetaType::User && (v.userType() ==  m_pyobjmetaid))
-            {
-              PyObjectPtr op = v.value<PyObjectPtr>();
-              value = op.object();
-              // Need to increment object count otherwise will go away when Py_XDECREF used on pyargs
-              Py_XINCREF(value);
+            if (v.typeId() >= QMetaType::User && (v.userType() ==  m_pyobjmetaid)) {
+                PyObjectPtr op = v.value<PyObjectPtr>();
+                value = op.object();
+                // Need to increment object count otherwise will go away when Py_XDECREF used on pyargs
+                Py_XINCREF(value);
 
-            } else if ((QMetaType::Type)v.type() >= QMetaType::User && (v.userType() ==  m_listintmetaid))
-            {
-              QList<int> alist = v.value<QList<int> >();
-              value = PyList_New(alist.size());
-              int pos = 0;
-              foreach(int i, alist) {
-                  PyList_SetItem(value, pos, Py_BuildValue("i", i));
-                  pos++;
-              }
+            } else if (v.typeId() >= QMetaType::User && (v.userType() ==  m_listintmetaid)) {
+                QList<int> alist = v.value<QList<int> >();
+                value = PyList_New(alist.size());
+                int pos = 0;
+                foreach(int i, alist) {
+                    PyList_SetItem(value, pos, Py_BuildValue("i", i));
+                    pos++;
+                }
+            } else if (v.typeId() >= QMetaType::User && (v.userType() ==  m_stdpairintintmetaid)) {
+                std::pair<int,int> pi = v.value<std::pair<int,int> >();
+                value = PyTuple_New(2);
+                PyTuple_SetItem(value, 0, Py_BuildValue("i", pi.first));
+                PyTuple_SetItem(value, 1, Py_BuildValue("i", pi.second));
             } else {
-
               // Ensure we don't have any holes.
               value = Py_BuildValue("u", "");
             }

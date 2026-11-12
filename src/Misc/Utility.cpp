@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
-**  Copyright (C) 2016-2020 Doug Massay
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2016-2024 Doug Massay
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -39,49 +39,49 @@
 #include <vector>
 
 #include <QApplication>
-#include <QtCore/QDir>
-#include <QtCore/QFile>
-#include <QtCore/QFileInfo>
-#include <QtCore/QProcess>
-#include <QtCore/QStandardPaths>
-#include <QtCore/QStringList>
-#include <QtCore/QStringRef>
-#include <QtCore/QTextStream>
-#include <QtCore/QtGlobal>
-#include <QtCore/QUrl>
-#include <QtCore/QUuid>
-#include <QtWidgets/QMainWindow>
+#include <QDir>
+#include <QByteArray>
+#include <QFile>
+#include <QFileInfo>
+#include <QProcess>
+#include <QStandardPaths>
+#include <QStringList>
+#include <QStringView>
+#include <QTextStream>
+#include <QtGlobal>
+#include <QUrl>
+#include <QUuid>
+#include <QMainWindow>
 #include <QTextEdit>
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QRegularExpressionMatch>
-#include <QFile>
-#include <QFileInfo>
 #include <QCollator>
+#include <QStringDecoder>
 #include <QMenu>
 #include <QSet>
+#if QT_VERSION >= QT_VERSION_CHECK(6,5,0)
+    #include <QStyleHints>
+#endif
 #include <QVector>
+#include <QImage>
+#include <QPainter>
+#include <QtSvg/QSvgRenderer>
 #include <QDebug>
 
 #include "sigil_constants.h"
 #include "sigil_exception.h"
-#include "Misc/QCodePage437Codec.h"
 #include "Misc/SettingsStore.h"
 #include "Misc/SleepFunctions.h"
+#include "MainUI/MainWindow.h"
 #include "MainUI/MainApplication.h"
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    #define QT_ENUM_SKIPEMPTYPARTS Qt::SkipEmptyParts
-    #define QT_ENUM_KEEPEMPTYPARTS Qt::KeepEmptyParts
-#else
-    #define QT_ENUM_SKIPEMPTYPARTS QString::SkipEmptyParts
-    #define QT_ENUM_KEEPEMPTYPARTS QString::KeepEmptyParts
-#endif
+#include "Parsers/QuickParser.h"
+#include "Widgets/AlertBox.h"
 
 static const QString URL_SAFE = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_.-/~";
 
 static const QString DARK_STYLE =
-    "<style>:root { background-color: %1; color: %2; } ::-webkit-scrollbar { display: none; }</style>"
+    "<style id=\"Sigil_Injected\">:root { background-color: %1; color: %2; } ::-webkit-scrollbar { display: none; }</style>"
     "<link rel=\"stylesheet\" type=\"text/css\" href=\"%3\" />";
 
 #ifndef MAX_PATH
@@ -91,25 +91,7 @@ static const QString DARK_STYLE =
 // This is the same read buffer size used by Java and Perl.
 #define BUFF_SIZE 8192
 
-static QCodePage437Codec *cp437 = 0;
-
-// Subclass QMessageBox for our StdWarningDialog to make any Details Resizable
-class SigilMessageBox: public QMessageBox
-{
-    public:
-        SigilMessageBox(QWidget* parent) : QMessageBox(parent) 
-        {
-            setSizeGripEnabled(true);
-        }
-    private:
-        virtual void resizeEvent(QResizeEvent * e) {
-            QMessageBox::resizeEvent(e);
-            setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
-            if (QWidget *textEdit = findChild<QTextEdit *>()) {
-                textEdit->setMaximumHeight(QWIDGETSIZE_MAX);
-            }
-        }
-};
+static QStringDecoder *cp437 = nullptr;
 
 #include "Misc/Utility.h"
 
@@ -122,21 +104,14 @@ QString Utility::DefinePrefsDir()
     if (!SIGIL_PREFS_DIR.isEmpty()) {
         return SIGIL_PREFS_DIR;
     } else {
-        return QStandardPaths::writableLocation(QStandardPaths::DataLocation);
+        return QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
     }
 }
 
 bool Utility::IsDarkMode()
 {
-#ifdef Q_OS_MAC
     MainApplication *mainApplication = qobject_cast<MainApplication *>(qApp);
     return mainApplication->isDarkMode();
-#else
-    // Windows, Linux and Other platforms
-    QPalette app_palette = qApp->palette();
-    bool isdark = app_palette.color(QPalette::Active,QPalette::WindowText).lightness() > 128;
-    return isdark;
-#endif
 }
 
 bool Utility::IsWindowsSysDarkMode()
@@ -151,13 +126,8 @@ bool Utility::IsWindowsSysDarkMode()
 
 bool Utility::WindowsShouldUseDarkMode()
 {
-    QString override(GetEnvironmentVar("SIGIL_USES_DARK_MODE"));
-    if (override.isEmpty()) {
-        //Env var unset - use system registry setting.
-        return IsWindowsSysDarkMode();
-    }
-    // Otherwise use the env var: anything other than "0" is true.
-    return (override == "0" ? false : true);
+    return IsWindowsSysDarkMode();
+    // No more forcing of light/dark on Windows: use Windows settings.
 }
 
 #if !defined(Q_OS_WIN32) && !defined(Q_OS_MAC)
@@ -284,12 +254,12 @@ bool Utility::IsMixedCase(const QString &string)
     return false;
 }
 
-// Returns a substring from a specified QStringRef;
+// Returns a substring from a specified QStringView as a real QString;
 // the characters included are in the interval:
 // [ start_index, end_index >
-QString Utility::Substring(int start_index, int end_index, const QStringRef &string)
+QString Utility::Substring(int start_index, int end_index, const QStringView string)
 {
-    return string.mid(start_index, end_index - start_index).toString();
+    return string.sliced(start_index, end_index - start_index).toString();
 }
 
 
@@ -302,13 +272,14 @@ QString Utility::Substring(int start_index, int end_index, const QString &string
 
 }
 
-// Returns a substring of a specified string;
+// Returns a substring of a specified string as a QStringView
 // the characters included are in the interval:
 // [ start_index, end_index >
-QStringRef Utility::SubstringRef(int start_index, int end_index, const QString &string)
+QStringView Utility::SubstringView(int start_index, int end_index, const QString &string)
 {
-    return string.midRef(start_index, end_index - start_index);
+    return QStringView(string).sliced(start_index, end_index - start_index);
 }
+
 // Replace the first occurrence of string "before"
 // with string "after" in string "string"
 QString Utility::ReplaceFirst(const QString &before, const QString &after, const QString &string)
@@ -419,6 +390,25 @@ bool Utility::ForceCopyFile(const QString &fullinpath, const QString &fulloutpat
     return QFile::copy(fullinpath, fulloutpath);
 }
 
+// Copy File from src (full abs path) to dest (full abs path) with write with truncation
+// without ever deleting the dest file file first
+bool Utility::OverWriteFileWith(const QString src, const QString dest)
+{
+    QFile src_file(src);
+    QFile dest_file(dest);
+    if (!src_file.open(QIODevice::ReadOnly)) return false;
+    if (!dest_file.open(QIODevice::WriteOnly | QIODevice::Truncate)) return false;
+    const qint64 bufsize = 4096;
+    QByteArray buffer;
+    buffer.resize(bufsize);
+    while(!src_file.atEnd()) {
+        buffer = src_file.read(bufsize);
+        if (dest_file.write(buffer) == -1) {
+            return false;
+        }
+    }
+    return true;
+}
 
 // Needed to add the S to this routine name to prevent collisions on Windows
 // We had to do the same thing for DeleteFile earlier
@@ -488,7 +478,10 @@ QString Utility::GetTemporaryFileNameWithExtension(const QString &extension)
     SettingsStore ss;
     QString temp_path = ss.tempFolderHome();
     if (temp_path == "<SIGIL_DEFAULT_TEMP_HOME>") {
-        temp_path = QDir::tempPath();
+        temp_path = DefinePrefsDir() + "/workspace";
+    }
+    if (!QDir(temp_path).exists()) {
+        temp_path = DefinePrefsDir() + "/workspace";
     }
     return temp_path +  "/sigil_" + Utility::CreateUUID() + extension;
 }
@@ -524,7 +517,7 @@ bool Utility::IsFileReadable(const QString &fullfilepath)
 // Reads the text file specified with the full file path;
 // text needs to be in UTF-8 or UTF-16; if the file cannot
 // be read, an error dialog is shown and an empty string returned
-QString Utility::ReadUnicodeTextFile(const QString &fullfilepath)
+QString Utility::ReadUnicodeTextFile(const QString &fullfilepath, bool canthrow)
 {
     // TODO: throw an exception instead of
     // returning an empty string
@@ -533,46 +526,48 @@ QString Utility::ReadUnicodeTextFile(const QString &fullfilepath)
     // Check if we can open the file
     if (!file.open(QFile::ReadOnly)) {
         std::string msg = fullfilepath.toStdString() + ": " + file.errorString().toStdString();
-        throw(CannotOpenFile(msg));
+        if (canthrow) {
+            throw(CannotOpenFile(msg));
+        }
+        qDebug() << QString::fromStdString(msg);
+        return QString();
     }
-
     QTextStream in(&file);
     // Input should be UTF-8
-    in.setCodec("UTF-8");
     // This will automatically switch reading from
     // UTF-8 to UTF-16 if a BOM is detected
     in.setAutoDetectUnicode(true);
-    return ConvertLineEndings(in.readAll());
+    return ConvertLineEndingsAndNormalize(in.readAll());
 }
 
 
 // Writes the provided text variable to the specified
 // file; if the file exists, it is truncated
-void Utility::WriteUnicodeTextFile(const QString &text, const QString &fullfilepath)
+void Utility::WriteUnicodeTextFile(const QString &text, const QString &fullfilepath, bool canthrow)
 {
+    QString newtext = Utility::UseNFC(text);
     QFile file(fullfilepath);
 
-    if (!file.open(QIODevice::WriteOnly |
-                   QIODevice::Truncate  |
-                   QIODevice::Text
-                  )
-       ) {
-        std::string msg = file.fileName().toStdString() + ": " + file.errorString().toStdString();
-        throw(CannotOpenFile(msg));
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate  | QIODevice::Text)) {
+        std::string msg = fullfilepath.toStdString() + ": " + file.errorString().toStdString();
+        if (canthrow) {
+            throw(CannotOpenFile(msg));
+	}
+	qDebug() << QString::fromStdString(msg);
+	return;
     }
 
     QTextStream out(&file);
     // We ALWAYS output in UTF-8
-    out.setCodec("UTF-8");
-    out << text;
+    out << newtext;
 }
 
 
 // Converts Mac and Windows style line endings to Unix style
 // line endings that are expected throughout the Qt framework
-QString Utility::ConvertLineEndings(const QString &text)
+QString Utility::ConvertLineEndingsAndNormalize(const QString &text)
 {
-    QString newtext(text);
+    QString newtext = Utility::UseNFC(text);
     return newtext.replace("\x0D\x0A", "\x0A").replace("\x0D", "\x0A");
 }
 
@@ -641,6 +636,10 @@ QString Utility::URLEncodePath(const QString &path)
     // url encoding them
     QString newpath = DecodeXML(path);
 
+    // The epub spec says all paths must use Unicode Normalization Form C (NFC)
+    // So do NOT Use Utility::UseNFC which conditionalizes things
+    newpath = newpath.normalized(QString::NormalizationForm_C);
+
     // then undo any existing url encoding
     newpath = URLDecodePath(newpath);
 
@@ -648,7 +647,7 @@ QString Utility::URLEncodePath(const QString &path)
     QVector<uint32_t> codepoints = newpath.toUcs4();
     for (int i = 0; i < codepoints.size(); i++) {
         uint32_t cp = codepoints.at(i);
-        QString s = QString::fromUcs4(&cp, 1);
+        QString s = QString::fromUcs4(reinterpret_cast<char32_t *>(&cp), 1);
         if (NeedToPercentEncode(cp)) {
             QByteArray b = s.toUtf8();
             for (int j = 0; j < b.size(); j++) {
@@ -679,13 +678,18 @@ QString Utility::URLDecodePath(const QString &path)
     // the "&" character which should *not* exist if properly
     // url encoded and if found try to xml decode them first
     apath = DecodeXML(apath);
-    return QUrl::fromPercentEncoding(apath.toUtf8());
+    QString newpath = QUrl::fromPercentEncoding(apath.toUtf8());
+    // epub spec says all paths must use Normalization Form C (NFC)
+    // Do Not use Utility::UseNFC as it conditionalizes it
+    newpath = newpath.normalized(QString::NormalizationForm_C);
+    return newpath;
 }
 
 
 void Utility::DisplayExceptionErrorDialog(const QString &error_info)
 {
-    QMessageBox message_box(QApplication::activeWindow());
+    QWidget * parent = QApplication::activeWindow();
+    QMessageBox message_box(parent);
     message_box.setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint);
     message_box.setModal(true);
     message_box.setIcon(QMessageBox::Critical);
@@ -704,14 +708,17 @@ void Utility::DisplayExceptionErrorDialog(const QString &error_info)
 
     message_box.setDetailedText(detailed_text.join("\n"));
     message_box.exec();
+#ifdef Q_OS_MAC    
+    if (parent) parent->activateWindow();
+#endif
 }
 
 
-void Utility::DisplayStdErrorDialog(const QString &error_message, const QString &detailed_text)
+void Utility::DisplayStdErrorDialog(const QString &error_message, const QString &detailed_text, QWidget* parent)
 {
-    QMessageBox message_box(QApplication::activeWindow());
-    message_box.setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint);
-    message_box.setModal(true);
+#if 0
+    QMessageBox message_box(parent);
+    message_box.setWindowModality(Qt::ApplicationModal);
     message_box.setIcon(QMessageBox::Critical);
     message_box.setWindowTitle("Sigil");
     message_box.setText(error_message);
@@ -722,14 +729,29 @@ void Utility::DisplayStdErrorDialog(const QString &error_message, const QString 
 
     message_box.setStandardButtons(QMessageBox::Close);
     message_box.exec();
+#else
+    // Use our own resizeable AlertBox
+    AlertBox albox(parent);
+    albox.setWindowModality(Qt::ApplicationModal);
+    albox.setIcon(AlertBox::Critical);
+    albox.setWindowTitle("Sigil");
+    albox.setText(error_message);
+
+    if (!detailed_text.isEmpty()) {
+        albox.setDetailedText(detailed_text);
+    }
+
+    albox.setStandardButtons(QDialogButtonBox::Close);
+    albox.exec();
+#endif
 }
 
 
-void Utility::DisplayStdWarningDialog(const QString &warning_message, const QString &detailed_text)
+void Utility::DisplayStdWarningDialog(const QString &warning_message, const QString &detailed_text, QWidget * parent)
 {
-    SigilMessageBox message_box(QApplication::activeWindow());
-    message_box.setWindowFlags(Qt::Window | Qt::WindowStaysOnTopHint);
-    message_box.setModal(true);
+#if 0
+    QMessageBox message_box(parent);
+    message_box.setWindowModality(Qt::ApplicationModal);
     message_box.setIcon(QMessageBox::Warning);
     message_box.setWindowTitle("Sigil");
     message_box.setText(warning_message);
@@ -740,21 +762,31 @@ void Utility::DisplayStdWarningDialog(const QString &warning_message, const QStr
     }
     message_box.setStandardButtons(QMessageBox::Ok);
     message_box.exec();
+#else
+    // Use our own resizeable AlertBox
+    AlertBox albox(parent);
+    albox.setWindowModality(Qt::ApplicationModal);
+    albox.setIcon(AlertBox::Warning);
+    albox.setWindowTitle("Sigil");
+    albox.setText(warning_message);
+    albox.setTextFormat(Qt::RichText);
+
+    if (!detailed_text.isEmpty()) {
+        albox.setDetailedText(detailed_text);
+    }
+    albox.setStandardButtons(QDialogButtonBox::Ok);
+    albox.exec();
+#endif
 }
 
 // Returns a value for the environment variable name passed;
 // if the env var isn't set, it returns an empty string
 QString Utility::GetEnvironmentVar(const QString &variable_name)
 {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
     // The only time this might fall down is on Linux when an
     // environment variable holds bytedata. Don't use this
     // utility function for retrieval if that's the case.
     return qEnvironmentVariable(variable_name.toUtf8().constData(), "").trimmed();
-#else
-    // This will typically only be used on older Qts on Linux
-    return QProcessEnvironment::systemEnvironment().value(variable_name, "").trimmed();
-#endif
 }
 
 
@@ -773,6 +805,16 @@ QWidget *Utility::GetMainWindow()
     }
 
     return parent_window;
+}
+
+
+QString Utility::GetMainWindowMetadata()
+{
+    MainWindow* mw = qobject_cast<MainWindow*>(GetMainWindow()); 
+    if (mw) {
+        return mw->GetOPFMetadataXML();
+    }
+    return QString("<metadata></metadata");
 }
 
 
@@ -798,7 +840,7 @@ bool Utility::has_non_ascii_chars(const QString &str)
 bool Utility::use_filename_warning(const QString &filename)
 {
     if (has_non_ascii_chars(filename)) {
-        return QMessageBox::Apply == QMessageBox::warning(QApplication::activeWindow(),
+        return QMessageBox::Apply == Utility::warning(QApplication::activeWindow(),
                 tr("Sigil"),
                 tr("The requested file name contains non-ASCII characters. "
                    "You should only use ASCII characters in filenames. "
@@ -815,11 +857,6 @@ std::wstring Utility::QStringToStdWString(const QString &str)
 {
     return std::wstring((const wchar_t *)str.utf16());
 }
-
-QString Utility::stdWStringToQString(const std::wstring &str)
-{
-    return QString::fromUtf16((const ushort *)str.c_str());
-}
 #endif
 
 
@@ -828,7 +865,7 @@ bool Utility::UnZip(const QString &zippath, const QString &destpath)
     int res = 0;
     QDir dir(destpath);
     if (!cp437) {
-        cp437 = new QCodePage437Codec();
+        cp437 = new QStringDecoder("IBM437");
     }
 #ifdef Q_OS_WIN32
     zlib_filefunc64_def ffunc;
@@ -853,10 +890,14 @@ bool Utility::UnZip(const QString &zippath, const QString &destpath)
             QString qfile_name;
             QString cp437_file_name;
             qfile_name = QString::fromUtf8(file_name);
+            // must do this unconditionally for epub spec
+            qfile_name = qfile_name.normalized(QString::NormalizationForm_C);
             if (!(file_info.flag & (1<<11))) {
                 // General purpose bit 11 says the filename is utf-8 encoded. If not set then
                 // IBM 437 encoding might be used.
-                cp437_file_name = cp437->toUnicode(file_name);
+                cp437_file_name = cp437->decode(file_name);
+                // must do this unconditionally for epub spec
+                cp437_file_name = cp437_file_name.normalized(QString::NormalizationForm_C);
             }
 
             // If there is no file name then we can't do anything with it.
@@ -876,17 +917,17 @@ bool Utility::UnZip(const QString &zippath, const QString &destpath)
                 qfile_name = "/" + qfile_name.replace("\\","");
 
                 if (qfile_name.contains("/../")) evil_or_corrupt_epub = true;
-                qfile_name = qfile_name.replace("/../","/");
+                while(qfile_name.contains("/../")) qfile_name.replace("/../","/");
     
                 while(qfile_name.startsWith("/")) { 
                     qfile_name = qfile_name.remove(0,1);
                 }
-                    
+
                 if (cp437_file_name.contains("\\")) evil_or_corrupt_epub = true; 
                 cp437_file_name = "/" + cp437_file_name.replace("\\","");
 
                 if (cp437_file_name.contains("/../")) evil_or_corrupt_epub = true;
-                cp437_file_name = cp437_file_name.replace("/../","/");
+                while(cp437_file_name.contains("/../")) cp437_file_name.replace("/../","/");
     
                 while(cp437_file_name.startsWith("/")) { 
                   cp437_file_name = cp437_file_name.remove(0,1);
@@ -976,7 +1017,7 @@ QStringList Utility::ZipInspect(const QString &zippath)
     int res = 0;
 
     if (!cp437) {
-        cp437 = new QCodePage437Codec();
+        cp437 = new QStringDecoder("IBM437");
     }
 #ifdef Q_OS_WIN32
     zlib_filefunc64_def ffunc;
@@ -999,8 +1040,12 @@ QStringList Utility::ZipInspect(const QString &zippath)
             QString qfile_name;
             QString cp437_file_name;
             qfile_name = QString::fromUtf8(file_name);
+            // must do this unconditionally for epub spec
+            qfile_name = qfile_name.normalized(QString::NormalizationForm_C);
             if (!(file_info.flag & (1<<11))) {
-                cp437_file_name = cp437->toUnicode(file_name);
+                cp437_file_name = cp437->decode(file_name);
+                // must do this unconditionally for epub spec
+                cp437_file_name = cp437_file_name.normalized(QString::NormalizationForm_C);
             }
 
             // If there is no file name then we can't do anything with it.
@@ -1022,7 +1067,7 @@ QStringList Utility::ZipInspect(const QString &zippath)
 QString Utility::longestCommonPath(const QStringList& filepaths, const QString& sep)
 {
     if (filepaths.isEmpty()) return QString();
-    if (filepaths.length() == 1) return QFileInfo(filepaths.at(0)).absolutePath() + sep;
+    if (filepaths.length() == 1) return QFileInfo(filepaths.at(0)).filePath() + sep;
     QStringList fpaths(filepaths);
     fpaths.sort();
     const QStringList segs1 = fpaths.first().split(sep);
@@ -1077,8 +1122,8 @@ QString Utility::relativePath(const QString & destination, const QString & start
     while (dest.endsWith(sep)) dest.chop(1);
     while (start.endsWith(sep)) start.chop(1);
 
-    QStringList dsegs = dest.split(sep, QT_ENUM_KEEPEMPTYPARTS);
-    QStringList ssegs = start.split(sep, QT_ENUM_KEEPEMPTYPARTS);
+    QStringList dsegs = dest.split(sep,  Qt::KeepEmptyParts);
+    QStringList ssegs = start.split(sep,  Qt::KeepEmptyParts);
     QStringList res;
     int i = 0;
     int nd = dsegs.size();
@@ -1176,6 +1221,13 @@ QString Utility::buildRelativeHREF(const QString &apath, const QString &afrag)
     return newhref;
 }
 
+
+bool Utility::sort_string_pairs_by_first(const std::pair<QString, QString> &a, const std::pair<QString, QString> &b)
+{
+    return (QString::localeAwareCompare(a.first, b.first) < 0);
+}
+
+
 bool Utility::sort_pair_in_reverse(const std::pair<int,QString> &a, const std::pair<int,QString> &b)
 {
     return (a.first > b.first);
@@ -1207,6 +1259,7 @@ QStringList Utility::LocaleAwareSort(const QStringList &names)
     std::sort(nlist.begin(), nlist.end(), uiCollator);
     return nlist;
 }
+
 
 
 QString Utility::AddDarkCSS(const QString &html)
@@ -1352,4 +1405,277 @@ QString Utility::GenerateUniqueId(const QString &id, const QSet<QString>& Used)
         new_id = id + "_" + QString::number(cnt);
     }
     return new_id;
+}
+
+ 
+const quint32 CRC32_TAB[256] =
+{
+	0x00000000, 0x77073096, 0xee0e612c, 0x990951ba, 0x076dc419, 0x706af48f, 0xe963a535, 0x9e6495a3,
+	0x0edb8832, 0x79dcb8a4, 0xe0d5e91e, 0x97d2d988, 0x09b64c2b, 0x7eb17cbd, 0xe7b82d07, 0x90bf1d91,
+	0x1db71064, 0x6ab020f2, 0xf3b97148, 0x84be41de, 0x1adad47d, 0x6ddde4eb, 0xf4d4b551, 0x83d385c7,
+	0x136c9856, 0x646ba8c0, 0xfd62f97a, 0x8a65c9ec, 0x14015c4f, 0x63066cd9, 0xfa0f3d63, 0x8d080df5,
+	0x3b6e20c8, 0x4c69105e, 0xd56041e4, 0xa2677172, 0x3c03e4d1, 0x4b04d447, 0xd20d85fd, 0xa50ab56b,
+	0x35b5a8fa, 0x42b2986c, 0xdbbbc9d6, 0xacbcf940, 0x32d86ce3, 0x45df5c75, 0xdcd60dcf, 0xabd13d59,
+	0x26d930ac, 0x51de003a, 0xc8d75180, 0xbfd06116, 0x21b4f4b5, 0x56b3c423, 0xcfba9599, 0xb8bda50f,
+	0x2802b89e, 0x5f058808, 0xc60cd9b2, 0xb10be924, 0x2f6f7c87, 0x58684c11, 0xc1611dab, 0xb6662d3d,
+	0x76dc4190, 0x01db7106, 0x98d220bc, 0xefd5102a, 0x71b18589, 0x06b6b51f, 0x9fbfe4a5, 0xe8b8d433,
+	0x7807c9a2, 0x0f00f934, 0x9609a88e, 0xe10e9818, 0x7f6a0dbb, 0x086d3d2d, 0x91646c97, 0xe6635c01,
+	0x6b6b51f4, 0x1c6c6162, 0x856530d8, 0xf262004e, 0x6c0695ed, 0x1b01a57b, 0x8208f4c1, 0xf50fc457,
+	0x65b0d9c6, 0x12b7e950, 0x8bbeb8ea, 0xfcb9887c, 0x62dd1ddf, 0x15da2d49, 0x8cd37cf3, 0xfbd44c65,
+	0x4db26158, 0x3ab551ce, 0xa3bc0074, 0xd4bb30e2, 0x4adfa541, 0x3dd895d7, 0xa4d1c46d, 0xd3d6f4fb,
+	0x4369e96a, 0x346ed9fc, 0xad678846, 0xda60b8d0, 0x44042d73, 0x33031de5, 0xaa0a4c5f, 0xdd0d7cc9,
+	0x5005713c, 0x270241aa, 0xbe0b1010, 0xc90c2086, 0x5768b525, 0x206f85b3, 0xb966d409, 0xce61e49f,
+	0x5edef90e, 0x29d9c998, 0xb0d09822, 0xc7d7a8b4, 0x59b33d17, 0x2eb40d81, 0xb7bd5c3b, 0xc0ba6cad,
+	0xedb88320, 0x9abfb3b6, 0x03b6e20c, 0x74b1d29a, 0xead54739, 0x9dd277af, 0x04db2615, 0x73dc1683,
+	0xe3630b12, 0x94643b84, 0x0d6d6a3e, 0x7a6a5aa8, 0xe40ecf0b, 0x9309ff9d, 0x0a00ae27, 0x7d079eb1,
+	0xf00f9344, 0x8708a3d2, 0x1e01f268, 0x6906c2fe, 0xf762575d, 0x806567cb, 0x196c3671, 0x6e6b06e7,
+    0xfed41b76, 0x89d32be0, 0x10da7a5a, 0x67dd4acc, 0xf9b9df6f, 0x8ebeeff9, 0x17b7be43, 0x60b08ed5,
+	0xd6d6a3e8, 0xa1d1937e, 0x38d8c2c4, 0x4fdff252, 0xd1bb67f1, 0xa6bc5767, 0x3fb506dd, 0x48b2364b,
+	0xd80d2bda, 0xaf0a1b4c, 0x36034af6, 0x41047a60, 0xdf60efc3, 0xa867df55, 0x316e8eef, 0x4669be79,
+	0xcb61b38c, 0xbc66831a, 0x256fd2a0, 0x5268e236, 0xcc0c7795, 0xbb0b4703, 0x220216b9, 0x5505262f,
+	0xc5ba3bbe, 0xb2bd0b28, 0x2bb45a92, 0x5cb36a04, 0xc2d7ffa7, 0xb5d0cf31, 0x2cd99e8b, 0x5bdeae1d,
+	0x9b64c2b0, 0xec63f226, 0x756aa39c, 0x026d930a, 0x9c0906a9, 0xeb0e363f, 0x72076785, 0x05005713,
+	0x95bf4a82, 0xe2b87a14, 0x7bb12bae, 0x0cb61b38, 0x92d28e9b, 0xe5d5be0d, 0x7cdcefb7, 0x0bdbdf21,
+	0x86d3d2d4, 0xf1d4e242, 0x68ddb3f8, 0x1fda836e, 0x81be16cd, 0xf6b9265b, 0x6fb077e1, 0x18b74777,
+	0x88085ae6, 0xff0f6a70, 0x66063bca, 0x11010b5c, 0x8f659eff, 0xf862ae69, 0x616bffd3, 0x166ccf45,
+	0xa00ae278, 0xd70dd2ee, 0x4e048354, 0x3903b3c2, 0xa7672661, 0xd06016f7, 0x4969474d, 0x3e6e77db,
+	0xaed16a4a, 0xd9d65adc, 0x40df0b66, 0x37d83bf0, 0xa9bcae53, 0xdebb9ec5, 0x47b2cf7f, 0x30b5ffe9,
+	0xbdbdf21c, 0xcabac28a, 0x53b39330, 0x24b4a3a6, 0xbad03605, 0xcdd70693, 0x54de5729, 0x23d967bf,
+	0xb3667a2e, 0xc4614ab8, 0x5d681b02, 0x2a6f2b94, 0xb40bbe37, 0xc30c8ea1, 0x5a05df1b, 0x2d02ef8d
+};
+ 
+QString Utility::FileCRC32(const QString& filePath)
+{
+	QFile file(filePath);
+	char buf[BUFF_SIZE];
+	quint32 crc32 = 0;
+	qint64 n = 0;
+ 
+	if(!file.open(QIODevice::ReadOnly)) return "";
+ 
+	crc32 = 0xffffffff;
+	while((n = file.read(buf, 1)) > 0) {
+		for(qint64 i = 0; i < n; i++) {
+			crc32 = (crc32 >> 8) ^ CRC32_TAB[((crc32 ^ buf[i]) & 0xff)];
+		}
+	}
+	crc32 ^= 0xffffffff;
+
+	file.close();
+	return QString("%1").arg(crc32, 8, 16, QLatin1Char('0'));
+}
+
+
+QMessageBox::StandardButton Utility::warning(QWidget* parent, const QString &title, const QString &text,
+                                             QMessageBox::StandardButtons buttons,
+                                             QMessageBox::StandardButton defaultButton)
+{
+    QMessageBox message_box(parent);
+#if defined(Q_OS_MAC)
+    message_box.setOption(QMessageBox::Option::DontUseNativeDialog);
+#endif
+    message_box.setWindowTitle(title);
+    message_box.setText(text);
+    message_box.setIcon(QMessageBox::Warning);
+    message_box.setWindowModality(Qt::ApplicationModal);
+    message_box.setStandardButtons(buttons);
+    message_box.setDefaultButton(defaultButton);
+    message_box.exec();
+    QMessageBox::StandardButton result = message_box.standardButton(message_box.clickedButton());
+#ifdef Q_OS_MAC
+    if (parent) parent->activateWindow();
+#endif
+    return result;
+}
+
+
+QMessageBox::StandardButton Utility::question(QWidget* parent, const QString &title, const QString &text,
+                                              QMessageBox::StandardButtons buttons,
+                                              QMessageBox::StandardButton defaultButton)
+{
+    QMessageBox message_box(parent);
+#if defined(Q_OS_MAC)
+    message_box.setOption(QMessageBox::Option::DontUseNativeDialog);
+#endif
+    message_box.setWindowTitle(title);
+    message_box.setText(text);
+    message_box.setIcon(QMessageBox::Question);
+    message_box.setWindowModality(Qt::ApplicationModal);
+    message_box.setStandardButtons(buttons);
+    message_box.setDefaultButton(defaultButton);
+    message_box.exec();
+    QMessageBox::StandardButton result = message_box.standardButton(message_box.clickedButton());
+#ifdef Q_OS_MAC
+    if (parent) parent->activateWindow();
+#endif
+    return result;
+}
+
+
+QMessageBox::StandardButton Utility::information(QWidget* parent, const QString &title, const QString &text,
+                                                 QMessageBox::StandardButtons buttons,
+                                                 QMessageBox::StandardButton defaultButton)
+{
+    QMessageBox message_box(parent);
+#if defined(Q_OS_MAC)
+    message_box.setOption(QMessageBox::Option::DontUseNativeDialog);
+#endif
+    message_box.setWindowTitle(title);
+    message_box.setText(text);
+    message_box.setIcon(QMessageBox::Information);
+    message_box.setWindowModality(Qt::ApplicationModal);
+    message_box.setStandardButtons(buttons);
+    message_box.setDefaultButton(defaultButton);
+    message_box.exec();
+    QMessageBox::StandardButton result = message_box.standardButton(message_box.clickedButton());
+#ifdef Q_OS_MAC
+    if (parent) parent->activateWindow();
+#endif
+    return result;
+}
+
+QMessageBox::StandardButton Utility::critical(QWidget* parent, const QString &title, const QString &text,
+                                              QMessageBox::StandardButtons buttons,
+                                              QMessageBox::StandardButton defaultButton)
+{
+    QMessageBox message_box(parent);
+#if defined(Q_OS_MAC)
+    message_box.setOption(QMessageBox::Option::DontUseNativeDialog);
+#endif
+    message_box.setWindowTitle(title);
+    message_box.setText(text);
+    message_box.setIcon(QMessageBox::Critical);
+    message_box.setWindowModality(Qt::ApplicationModal);
+    message_box.setStandardButtons(buttons);
+    message_box.setDefaultButton(defaultButton);
+    message_box.exec();
+    QMessageBox::StandardButton result = message_box.standardButton(message_box.clickedButton());
+#ifdef Q_OS_MAC
+    if (parent) parent->activateWindow();
+#endif
+    return result;
+}
+
+// QtSvg is broken with respect to desc and title tags used
+// inside text tags and does not support flowRoot and its children
+// so strip them all out before trying to render using QSvgRenderer
+QString Utility::FixupSvgForRendering(const QString& data)
+{
+    QStringList svgdata;
+    QuickParser qp(data);
+    bool skip = false;
+    bool in_svg = false;
+    while(true) {
+        QuickParser::MarkupInfo mi = qp.parse_next();
+        if (mi.pos < 0) break;
+	if (mi.tname == "svg" && mi.ttype == "begin") {
+	    in_svg = true;
+        }
+	if (mi.tname == "svg" && mi.ttype == "end") {
+	    in_svg = false;
+	    skip = false;
+	}
+	if (in_svg) {
+            if (mi.tname == "desc" || mi.tname == "title" || mi.tname == "flowRoot") {
+	        if (mi.ttype == "single") continue; // no need to update skip since open self-closing
+	        // allow for arbitrary nesting of these tags which is not explicitly ruled out by the spec
+	        QStringList tagpath = mi.tpath.split(".");
+	        skip = tagpath.contains("desc")  || tagpath.contains("title") || tagpath.contains( "flowRoot");
+		if (mi.ttype == "end") continue; // do not output end tags after updating skip
+	    }
+	}
+        if (!skip) {
+            svgdata << qp.serialize_markup(mi);
+        }
+    }
+    return svgdata.join("");
+}
+
+QImage Utility::RenderSvgToImage(const QString& filepath)
+{
+    QString svgdata = Utility::ReadUnicodeTextFile(filepath);
+    // QtSvg has many issues with desc, title, and flowRoot tags
+    svgdata = Utility::FixupSvgForRendering(svgdata);
+    QSvgRenderer renderer;
+    renderer.load(svgdata.toUtf8());
+    QSize sz = renderer.defaultSize();
+    QImage svgimage(sz, QImage::Format_ARGB32);
+    // **must** fill it with pixels BEFORE trying to render anything
+    // transparent fill will not work with light and dark modes: svgimage.fill(qRgba(0,0,0,0));
+    svgimage.fill(QColor("white"));
+    // was svgimage.fill(qRgba(0,0,0,0));
+    QPainter painter(&svgimage);
+    renderer.render(&painter);
+    return svgimage;
+
+}
+
+
+QString Utility::UseNFC(const QString& text)
+{
+    QString txt;
+    MainApplication *mainApplication = qobject_cast<MainApplication *>(qApp);
+    if (mainApplication && mainApplication->AlwaysUseNFC()) {
+        txt = text.normalized(QString::NormalizationForm_C);
+    } else {
+        txt = text;
+    }
+    return txt;
+}
+
+QString Utility::CleanFileName(const QString &name)
+{
+    QString result = name.normalized(QString::NormalizationForm_C);
+    result.replace(QRegularExpression("[\\\\|/|?*<>]"), "_");
+    result.replace(":", "_");
+    result.replace("\"", "_");
+    result.replace("+", "_");
+    result.replace(" ", "_");
+    result.replace(",", "_");
+    result.replace(";", "_");
+    result = result.trimmed();
+
+    QRegularExpression only_dots("^\\.+$");
+    if (result == "." || result == ".." || only_dots.match(result).hasMatch()) {
+        return "_";
+    }
+
+    result.replace(QRegularExpression("\\.{2,}"), "_");
+
+    result.replace('.', '_');
+
+    result.replace(QRegularExpression("_+"), "_");
+
+    if (result.isEmpty()) {
+        return "_";
+    }
+    return result;
+}
+
+// to be used in place of QFileDialog::Options() to initialize them
+QFileDialog::Options Utility::DlgOptions(const QString special_case)
+{
+    QFileDialog::Options options = QFileDialog::Options();
+    if (qEnvironmentVariableIsSet("SIGIL_NO_CUSTOM_DIRECTORY_ICONS")) {
+        options = options | QFileDialog::DontUseCustomDirectoryIcons;
+    }
+    if (qEnvironmentVariableIsSet("SIGIL_FORCE_NATIVE_FILE_DIALOG")) {
+        return options;
+    }
+#if defined(Q_OS_MAC)
+    if (special_case.contains("MacUseNative")) {
+        return options;
+    }
+    options = options | QFileDialog::DontUseNativeDialog;
+#elif defined(Q_OS_WIN32)
+    if (special_case.contains("Win32UseNonNative")) {
+        options = options | QFileDialog::DontUseNativeDialog;
+    }
+#else
+    // Linux and other Unix Platforms
+    if (special_case.contains("LinuxUseNonNative")) {
+        options = options | QFileDialog::DontUseNativeDialog;
+    }
+#endif
+    return options;
 }

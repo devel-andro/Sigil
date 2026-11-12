@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada 
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -28,7 +28,8 @@
 #include <QObject>
 #include <QUrl>
 #include <QPair>
-#include "ResourceObjects/OPFParser.h"
+#include <QFuture>
+#include "Parsers/OPFParser.h" // for MetaEntry
 #include "BookManipulation/XhtmlDoc.h"
 #include "ResourceObjects/Resource.h"
 
@@ -157,13 +158,6 @@ public:
                                      const QString &first_textdir=QString("\\"));
 
     /**
-     * Creates a new HTMLResource file with a basic XHTML structure
-     * inserted after the given resource.
-     * The file on disk has only placeholder text.
-     */
-    HTMLResource *CreateEmptyHTMLFile(HTMLResource *resource, const QString &folderpath = QString("\\"));
-
-    /**
      * Creates a new CSSResource file with no stored data.
      * The file on disk is empty.
      */
@@ -215,6 +209,13 @@ public:
     QHash <QString, QList<XhtmlDoc::XMLElement>> GetLinkElements();
     static std::tuple<QString, QList<XhtmlDoc::XMLElement>> GetLinkElementsInHTMLFileMapped(HTMLResource *html_resource);
 
+
+    bool RenameClassInHTML(const QString css_bookpath, const QString oldname, const QString newname);
+    static bool RenameClassInHTMLFileMapped(HTMLResource* html_resource,
+                                            const QString css_bookpath,
+                                            const QString oldname,
+                                            const QString newname);
+
     QStringList GetStyleUrlsInHTMLFiles();
     static std::tuple<QString, QStringList> GetStyleUrlsInHTMLFileMapped(HTMLResource *html_resource);
     QHash<QString, QStringList> GetIdsInHTMLFiles();
@@ -241,8 +242,11 @@ public:
     QHash<QString, QStringList> GetAudioInHTMLFiles();
     QHash< QString, std::pair<int,int> > GetSpellWordCountsInHTMLFiles();
     QHash<QString, QStringList> GetHTMLFilesUsingMedia();
+    QHash<QString, QStringList> GetHTMLFilesUsingMediaInStyleUrls();
+    QHash<QString, QStringList> GetCSSFilesUsingUrls();
     QHash<QString, QStringList> GetHTMLFilesUsingImages();
 
+    static std::tuple<QString, QStringList> GetUrlsInCSSFileMapped(CSSResource *css_resource);
     static std::tuple<QString, QStringList> GetMediaInHTMLFileMapped(HTMLResource *html_resource);
     static std::tuple<QString, QStringList> GetImagesInHTMLFileMapped(HTMLResource *html_resource);
     static std::tuple<QString, QStringList> GetVideoInHTMLFileMapped(HTMLResource *html_resource);
@@ -298,10 +302,18 @@ public:
     bool IsDataOnDiskWellFormed(HTMLResource *html_resource);
 
     /**
-     * Reformats All the book's html resources using either
-     * the 'Mend' or "Mend and Repair' CleanSource procedures.
+     * @return true if free of tag/attribute syntax errors
+     */
+    bool IsDataGumboWellFormed(HTMLResource *html_resource);
+
+    /**
+     * Reformats All the book's html resources using 'Mend' or 'PrettyPrint
      */
     void ReformatAllHTML(bool to_valid);
+
+    bool XhtmlUsesStyleProperty(HTMLResource* html_resource, QString property);
+    bool SafePrettyPrintResources(QList<HTMLResource*> resources);
+    QString SafePrettyPrint(const QString& bookpath, const QString& original_text);    
 
     /**
      * Checks for the presence of obfuscated fonts in the book.
@@ -405,7 +417,7 @@ private:
      *
      * @param section_info New section to create.
      */
-    NewSectionResult CreateOneNewSection(NewSection section_info);
+    NewSectionResult CreateANewSection(NewSection section_info);
 
     /**
      * Creates one new section/XHTML document.

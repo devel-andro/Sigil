@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford, Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford, Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -152,6 +152,8 @@ QList <Resource *> OPFModel::GetResourceListInFolder(Resource::ResourceType reso
         folder = m_AudioFolderItem;
     } else if (resource_type == Resource::VideoResourceType) {
         folder = m_VideoFolderItem;
+    } else if (resource_type == Resource::PdfResourceType) {
+        folder = m_MiscFolderItem;
     } else if (resource_type != Resource::OPFResourceType && resource_type != Resource::NCXResourceType) {
         folder = m_MiscFolderItem;
     }
@@ -161,7 +163,9 @@ QList <Resource *> OPFModel::GetResourceListInFolder(Resource::ResourceType reso
             QStandardItem *item = folder->child(i);
             QString identifier = item->data().toString();
             Resource *resource = m_Book->GetFolderKeeper()->GetResourceByIdentifier(identifier);
-            resources.append(resource);
+            if (resource->Type() == resource_type) { 
+                resources.append(resource);
+            }
         }
     }
 
@@ -188,7 +192,7 @@ QModelIndex OPFModel::GetModelItemIndex(Resource *resource, IndexChoice indexCho
                  (resourceType == Resource::CSSResourceType)) ||
                 (child == m_FontsFolderItem && resourceType == Resource::FontResourceType) ||
                 (child == m_MiscFolderItem &&
-                 (resourceType == Resource::GenericResourceType || resourceType == Resource::XMLResourceType)) ||
+                 (resourceType == Resource::PdfResourceType || resourceType == Resource::GenericResourceType || resourceType == Resource::XMLResourceType)) ||
                 (child == m_AudioFolderItem && resourceType == Resource::AudioResourceType) ||
                 (child == m_VideoFolderItem && resourceType == Resource::VideoResourceType)
                ) {
@@ -250,6 +254,8 @@ Resource::ResourceType OPFModel::GetResourceType(QStandardItem const *item)
     }
 
     if (item == m_MiscFolderItem) {
+        // filler lines to keep
+        // line numbers in sync with translation ts files
         return Resource::GenericResourceType;
     }
 
@@ -344,62 +350,86 @@ bool OPFModel:: RenameResourceList(const QList<Resource *> &resources, const QSt
     QApplication::setOverrideCursor(Qt::WaitCursor);
     QStringList not_renamed;
     QHash<QString, QString> update;
+    QList<Resource*> bulk_rename;
+    QStringList newnames;
+    QStringList oldpaths;
     SettingsStore ss;
     int i = 0;
     foreach(Resource * resource, resources) {
-        QString old_bookpath = resource->GetRelativePath();
-        QString old_filename = resource->Filename();
-        QString extension = old_filename.right(old_filename.length() - old_filename.lastIndexOf('.'));
-
-        QString new_filename = new_filenames.at(i++);
-        QString new_filename_with_extension = new_filename;
+        QString oldbookpath = resource->GetRelativePath();
+        QString oldfilename = resource->Filename();
+        QString extension = oldfilename.right(oldfilename.length() - oldfilename.lastIndexOf('.'));
+        QString newfilename = new_filenames.at(i++);
+        QString newfilename_with_extension = newfilename;
 
         // do not rename files in META-INF
-        if (old_bookpath.startsWith("META-INF/")) continue;
+        if (oldbookpath.startsWith("META-INF/")) continue;
 
-        if (!new_filename.contains('.')) {
-            new_filename_with_extension.append(extension);
+        if (!newfilename.contains('.')) {
+            newfilename_with_extension.append(extension);
         }
 
-        if (old_filename == new_filename_with_extension) {
+        if (oldfilename == newfilename_with_extension) {
             continue;
         }
 
-        if (!FilenameIsValid(old_bookpath, new_filename_with_extension)) {
+        if (!FilenameIsValid(oldbookpath, newfilename_with_extension)) {
             if (ss.showFullPathOn()) {
                 not_renamed.append(resource->GetRelativePath());
             } else {
                 not_renamed.append(resource->ShortPathName());
             }
-
             continue;
         }
 
-        bool rename_success = false;
         // special case the OPFResource and the NCXResource
         if (resource->Type() == Resource::OPFResourceType) {
             OPFResource* opfres = qobject_cast<OPFResource*>(resource);
             if (opfres) {
-                rename_success = opfres->RenameTo(new_filename_with_extension);
-            }
-        } else if (resource->Type() == Resource::NCXResourceType) {
-            NCXResource* ncxres = qobject_cast<NCXResource*>(resource);
-            if (ncxres) {
-                rename_success = ncxres->RenameTo(new_filename_with_extension);
-            }
-        } else {
-            rename_success = resource->RenameTo(new_filename_with_extension);
-        }
-        if (!rename_success) {
-            if (ss.showFullPathOn()) {
-                not_renamed.append(resource->GetRelativePath());
-            } else {
-                not_renamed.append(resource->ShortPathName());
+                if (opfres->RenameTo(newfilename_with_extension)) {
+                    QString newbookpath = opfres->GetRelativePath();
+                    resource->SetCurrentBookRelPath(oldbookpath);
+                    update[ oldbookpath ] = newbookpath;
+                } else {
+                    not_renamed.append(oldbookpath);
+                }
             }
             continue;
         }
 
-        update[ old_bookpath ] = resource->GetRelativePath();
+        if (resource->Type() == Resource::NCXResourceType) {
+            NCXResource* ncxres = qobject_cast<NCXResource*>(resource);
+            if (ncxres) {
+                if (ncxres->RenameTo(newfilename_with_extension)) {
+                    QString newbookpath = ncxres->GetRelativePath();
+                    resource->SetCurrentBookRelPath(oldbookpath);
+                    update[ oldbookpath ] = newbookpath;
+                } else {
+                    not_renamed.append(oldbookpath);
+                }
+            }
+            continue;
+        }
+
+        // otherwise add it to the bulk rename list
+        bulk_rename << resource;
+        newnames << newfilename_with_extension;
+        oldpaths << oldbookpath;
+    }
+
+    if (bulk_rename.size() > 0) {
+         m_Book->GetFolderKeeper()->BulkRenameResources(bulk_rename, newnames);
+        // add these resources to the update map if successfully renamed
+        for (int i=0; i < bulk_rename.size(); i++) {
+            Resource* rsc = bulk_rename.at(i);
+            if (rsc->GetRelativePath() != oldpaths.at(i)) {
+                // it was renamed successfully
+                rsc->SetCurrentBookRelPath(oldpaths.at(i));
+                update[ oldpaths.at(i) ] = rsc->GetRelativePath();
+            } else {
+                not_renamed.append(oldpaths.at(i));
+            }
+        }
     }
 
     if (update.count() > 0) {
@@ -417,13 +447,17 @@ bool OPFModel:: RenameResourceList(const QList<Resource *> &resources, const QSt
     return false;
 }
 
+
 bool OPFModel::MoveResourceList(const QList<Resource *> &resources, const QStringList &new_bookpaths)
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
     QStringList not_moved;
     QHash<QString, QString> update;
+    QList<Resource*> bulk_move;
+    QStringList newpaths;
+    QStringList oldpaths;
     int i = 0;
-    foreach(Resource * resource, resources) {
+    foreach(Resource* resource, resources) {
         const QString &oldbookpath = resource->GetRelativePath();
         QString filename = resource->Filename();
         QString newbookpath = new_bookpaths.at(i++);
@@ -437,30 +471,54 @@ bool OPFModel::MoveResourceList(const QList<Resource *> &resources, const QStrin
             continue;
         }
 
-        bool move_success = false;
         // special case the OPFResource and the NCXResource
         if (resource->Type() == Resource::OPFResourceType) {
             OPFResource* opfres = qobject_cast<OPFResource*>(resource);
             if (opfres) {
-                move_success = opfres->MoveTo(newbookpath);
+                if (opfres->MoveTo(newbookpath)) {
+                    resource->SetCurrentBookRelPath(oldbookpath);
+                    update[ oldbookpath ] = newbookpath;
+                } else {
+                    not_moved.append(oldbookpath);
+                    // qDebug() << "OPFModel: not moved " << oldbookpath;
+                }
             }
-        } else if (resource->Type() == Resource::NCXResourceType) {
+            continue;
+        }
+        if (resource->Type() == Resource::NCXResourceType) {
             NCXResource* ncxres = qobject_cast<NCXResource*>(resource);
             if (ncxres) {
-                move_success = ncxres->MoveTo(newbookpath);
+                if (ncxres->MoveTo(newbookpath)) {
+                    resource->SetCurrentBookRelPath(oldbookpath);
+                    update[ oldbookpath ] = newbookpath;
+                } else {
+                    not_moved.append(oldbookpath);
+                    // qDebug() << "OPFModel: not moved " << oldbookpath;
+                }
             }
-        } else {
-            move_success = resource->MoveTo(newbookpath);
-        }
-
-        if (!move_success) {
-            not_moved.append(oldbookpath);
-            // qDebug() << "OPFModel: not moved " << oldbookpath;
             continue;
         }
 
-        resource->SetCurrentBookRelPath(oldbookpath);
-        update[ oldbookpath ] = resource->GetRelativePath();
+        // otherwise add it to the bulk move list
+        bulk_move << resource;
+        newpaths << newbookpath;
+        oldpaths << oldbookpath;
+    }
+
+    if (bulk_move.size() > 0) {
+        m_Book->GetFolderKeeper()->BulkMoveResources(bulk_move, newpaths);
+        // add these resources to the update map if successfully moved
+        for (int i=0; i < bulk_move.size(); i++) {
+            Resource* rsc = bulk_move.at(i);
+            if (rsc->GetRelativePath() == newpaths.at(i)) {
+                // it was moved successfully
+                rsc->SetCurrentBookRelPath(oldpaths.at(i));
+                update[ oldpaths.at(i) ] = newpaths.at(i);
+            } else {
+                not_moved.append(oldpaths.at(i));
+                // qDebug() << "OPFModel: not moved " << oldpaths.at(i);
+            }
+        }
     }
 
     if (update.count() > 0) {
@@ -485,8 +543,18 @@ void OPFModel::InitializeModel()
     QList<Resource *> resources = m_Book->GetFolderKeeper()->GetResourceList();
     QHash <Resource *, int> reading_order_all = m_Book->GetOPF()->GetReadingOrderAll(resources);
     QString version = m_Book->GetConstOPF()->GetEpubVersion();
-    QHash <QString, QString> semantic_type_all;
+    QHash <QString, QStringList> semantic_type_all;
     QHash <QString, QString> manifest_properties_all;
+    // temp storage to that items can be block added for each folder type
+    // to save on signal generation
+    QList<QStandardItem*> html_items;
+    QList<QStandardItem*> css_items;
+    QList<QStandardItem*> img_items;
+    QList<QStandardItem*> font_items;
+    QList<QStandardItem*> misc_items;
+    QList<QStandardItem*> audio_items;
+    QList<QStandardItem*> video_items;
+    
     SettingsStore ss;
     if (version.startsWith('3')) {
         NavProcessor navproc(m_Book->GetConstOPF()->GetNavResource());
@@ -495,13 +563,14 @@ void OPFModel::InitializeModel()
     } else { 
         semantic_type_all = m_Book->GetOPF()->GetGuideSemanticNameForPaths();
     }
-
+    
     foreach(Resource * resource, resources) {
         AlphanumericItem * item;
+        QIcon fileicon = m_Book->GetFolderKeeper()->GetFileIconFromMediaType(resource->GetMediaType());
         if (ss.showFullPathOn()) {
-            item = new AlphanumericItem(resource->Icon(), resource->GetRelativePath());
+            item = new AlphanumericItem(fileicon, resource->GetRelativePath());
         } else {
-            item = new AlphanumericItem(resource->Icon(), resource->ShortPathName());
+            item = new AlphanumericItem(fileicon, resource->ShortPathName());
         }
         item->setDropEnabled(false);
         item->setData(resource->GetIdentifier());
@@ -515,7 +584,7 @@ void OPFModel::InitializeModel()
         }
 
         if (semantic_type_all.contains(path)) {
-            tooltip += " (" + semantic_type_all[path] + ")";
+            tooltip += " (" + semantic_type_all[path].join(",") + ")";
         }
         if (manifest_properties_all.contains(path)) {
             tooltip += " [" + manifest_properties_all[path] + "]";
@@ -529,7 +598,6 @@ void OPFModel::InitializeModel()
             } else {
                 reading_order = NO_READING_ORDER;
             }
-
             item->setData(reading_order, READING_ORDER_ROLE);
             // Remove the extension for alphanumeric sorting
             QString name;
@@ -539,93 +607,122 @@ void OPFModel::InitializeModel()
                 name = resource->ShortPathName().left(resource->ShortPathName().lastIndexOf('.'));
             }
             item->setData(name, ALPHANUMERIC_ORDER_ROLE);
-            m_TextFolderItem->appendRow(item);
+            html_items.append(item);
         } else if (resource->Type() == Resource::CSSResourceType) {
             item->setDragEnabled(false);
-            m_StylesFolderItem->appendRow(item);
+            css_items.append(item);
         } else if (resource->Type() == Resource::ImageResourceType ||
                    resource->Type() == Resource::SVGResourceType
                   ) {
             item->setDragEnabled(false);
-            m_ImagesFolderItem->appendRow(item);
+            img_items.append(item);
         } else if (resource->Type() == Resource::FontResourceType) {
             item->setDragEnabled(false);
-            m_FontsFolderItem->appendRow(item);
+            font_items.append(item);
         } else if (resource->Type() == Resource::AudioResourceType) {
             item->setDragEnabled(false);
-            m_AudioFolderItem->appendRow(item);
+            audio_items.append(item);
         } else if (resource->Type() == Resource::VideoResourceType) {
             item->setDragEnabled(false);
-            m_VideoFolderItem->appendRow(item);
+            video_items.append(item);
+        } else if (resource->Type() == Resource::PdfResourceType) {
+            item->setDragEnabled(false);
+            misc_items.append(item);
         } else if (resource->Type() == Resource::OPFResourceType ||
                    resource->Type() == Resource::NCXResourceType) {
+            // only 2 possible items here so do not group them
             item->setEditable(true);
             item->setDragEnabled(false);
             item->setToolTip(resource->GetRelativePath());
             appendRow(item);
         } else {
             item->setDragEnabled(false);
-            m_MiscFolderItem->appendRow(item);
+            misc_items.append(item);
         }
     }
+    if ( !html_items.isEmpty()  ) m_TextFolderItem->   appendRows(html_items);
+    if ( !css_items.isEmpty()   ) m_StylesFolderItem-> appendRows(css_items);
+    if ( !img_items.isEmpty()   ) m_ImagesFolderItem-> appendRows(img_items);
+    if ( !font_items.isEmpty()  ) m_FontsFolderItem->  appendRows(font_items);
+    if ( !misc_items.isEmpty()  ) m_MiscFolderItem->   appendRows(misc_items);
+    if ( !audio_items.isEmpty() ) m_AudioFolderItem->  appendRows(audio_items);
+    if ( !video_items.isEmpty() ) m_VideoFolderItem->  appendRows(video_items);
+
 }
 
 
+// the speed of this routine is critical to prevent
+// missed invocations from internal Qt drag and drop code
+// For non-contiguous drag and drop reordering this routine
+// is invoked once for each disjoint set in the drag.
 void OPFModel::UpdateHTMLReadingOrders()
 {
     QList<HTMLResource *> reading_order_htmls;
-
+    QString version = m_Book->GetConstOPF()->GetEpubVersion();
+    bool nav_in_spine = false;
+    HTMLResource * nav_res = nullptr;
+    if (version.startsWith("3")) {
+        nav_res = m_Book->GetConstOPF()->GetNavResource();
+        nav_in_spine = m_Book->GetConstOPF()->isNavInSpine();
+    }
+    int spine_order = 0;
     for (int i = 0; i < m_TextFolderItem->rowCount(); ++i) {
         QStandardItem *html_item = m_TextFolderItem->child(i);
         Q_ASSERT(html_item);
-        html_item->setData(i, READING_ORDER_ROLE);
         HTMLResource *html_resource =  qobject_cast<HTMLResource *>(
                                            m_Book->GetFolderKeeper()->GetResourceByIdentifier(html_item->data().toString()));
 
         if (html_resource != NULL) {
             // for some reason icons can be lost during drag and drop
-            html_item->setIcon(html_resource->Icon());
-            reading_order_htmls.append(html_resource);
+            html_item->setIcon(m_Book->GetFolderKeeper()->GetFileIconFromMediaType("application/xhtml+xml"));
+            QString bookpath = html_resource->GetRelativePath();
+
+            if ((version.startsWith("3")) && (!nav_in_spine) && (html_resource == nav_res)) {
+                // always sort nav to last if not in spine
+                // but do not actually add it to the spine
+                html_item->setData(m_TextFolderItem->rowCount()-1, READING_ORDER_ROLE);
+            } else {
+                reading_order_htmls.append(html_resource);
+                html_item->setData(spine_order, READING_ORDER_ROLE);
+                spine_order += 1;
+            }
         }
     }
-
     m_Book->GetOPF()->UpdateSpineOrder(reading_order_htmls);
     m_Book->SetModified();
+    // DO NOT CALL Refresh() here.
+    // It causes missed dnd signals from non-consecutive dnd ops
 }
 
 
 void OPFModel::ClearModel()
 {
-    while (m_TextFolderItem->rowCount() != 0) {
-        m_TextFolderItem->removeRow(0);
-    }
+    // block remove all items in each folder to reduce signal generation
+    
+    int rows = m_TextFolderItem->rowCount();
+    if ( rows > 0 ) m_TextFolderItem->removeRows(0, rows);
 
-    while (m_StylesFolderItem->rowCount() != 0) {
-        m_StylesFolderItem->removeRow(0);
-    }
+    rows = m_StylesFolderItem->rowCount();
+    if ( rows > 0 ) m_StylesFolderItem->removeRows(0, rows);
 
-    while (m_ImagesFolderItem->rowCount() != 0) {
-        m_ImagesFolderItem->removeRow(0);
-    }
+    rows = m_ImagesFolderItem->rowCount();
+    if ( rows > 0 ) m_ImagesFolderItem->removeRows(0, rows);
 
-    while (m_FontsFolderItem->rowCount() != 0) {
-        m_FontsFolderItem->removeRow(0);
-    }
+    rows = m_FontsFolderItem->rowCount();
+    if ( rows > 0 ) m_FontsFolderItem->removeRows(0, rows);
 
-    while (m_MiscFolderItem->rowCount() != 0) {
-        m_MiscFolderItem->removeRow(0);
-    }
+    rows = m_MiscFolderItem->rowCount();
+    if ( rows > 0 ) m_MiscFolderItem->removeRows(0, rows);
 
-    while (m_AudioFolderItem->rowCount() != 0) {
-        m_AudioFolderItem->removeRow(0);
-    }
+    rows = m_AudioFolderItem->rowCount();
+    if ( rows > 0 ) m_AudioFolderItem->removeRows(0, rows);
 
-    while (m_VideoFolderItem->rowCount() != 0) {
-        m_VideoFolderItem->removeRow(0);
-    }
+    rows = m_VideoFolderItem->rowCount();
+    if ( rows > 0 ) m_VideoFolderItem->removeRows(0, rows);
 
+    // grouping these non-folder items make no sense when
+    // there are only 2 items max
     int i = 0;
-
     while (i < invisibleRootItem()->rowCount()) {
         QStandardItem *child = invisibleRootItem()->child(i, 0);
 
@@ -730,10 +827,21 @@ bool OPFModel::FilenameIsValid(const QString &old_bookpath, const QString &new_f
     QString sdir = Utility::startingDir(old_bookpath);
     QString proposed_bookpath = sdir.isEmpty() ? new_filename : sdir + "/" + new_filename;
     const QStringList existing_bookpaths = m_Book->GetFolderKeeper()->GetAllBookPaths();
+    // Using QFileInfo is slow so pretest with a much faster method before using it
     if (existing_bookpaths.contains(proposed_bookpath, Qt::CaseInsensitive)) {
-        Utility::DisplayStdErrorDialog(
-            tr("The filename \"%1\" is already in use.\n").arg(new_filename));
-        return false;
+        // potential issue on filesystems that are case insensitive
+        QString FullPathToMainFolder = m_Book->GetFolderKeeper()->GetFullPathToMainFolder();
+        QString orig_full_path = FullPathToMainFolder + "/" + old_bookpath;
+        QString proposed_full_path = FullPathToMainFolder + "/" + proposed_bookpath;
+        if (QFileInfo::exists(proposed_full_path)) {
+            // return false if orig_full_path and proposed_full_path are different files
+            // but allow through case only variationss from case insensitive filesystems
+            if (QFileInfo(orig_full_path) != QFileInfo(proposed_full_path)) {
+                Utility::DisplayStdErrorDialog(
+                    tr("The filename \"%1\" is already in use.\n").arg(new_filename));
+                return false;
+            }
+        }
     }
     return true;
 }

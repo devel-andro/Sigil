@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2019 Kevin B. Hendricks, Stratford, Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford, Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -26,8 +26,8 @@
 
 #include <vector>
 
-#include <QtCore/QSharedPointer>
-#include <QtWidgets/QDockWidget>
+#include <QSharedPointer>
+#include <QDockWidget>
 #include <QPointer>
 #include <QPoint>
 #include <QMenu>
@@ -37,6 +37,7 @@
 
 class QTableWidget;
 class QTableWidgetItem;
+class QPaintEvent;
 
 class Book;
 
@@ -98,6 +99,8 @@ signals:
                              int position_to_scroll_to = -1,
                              const QString &caret_location_to_scroll_to = QString());
 
+    void ShowMessageRequest(const QString &message);
+
 private slots:
 
     void ExportAll();
@@ -111,6 +114,7 @@ private slots:
 
 protected:
     virtual void showEvent(QShowEvent *event);
+    virtual void paintEvent(QPaintEvent* event);
 
 private:
 

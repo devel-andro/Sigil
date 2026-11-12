@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2020-2021  Kevin B. Hendricks, Stratford, ON, Canada
+**  Copyright (C) 2020-2026  Kevin B. Hendricks, Stratford, ON, Canada
 **
 **  This file is part of Sigil.
 **
@@ -27,6 +27,8 @@
 #include <QWebEngineUrlSchemeHandler>
 #include <QBuffer>
 #include <QFile>
+#include <QImage>
+#include <QImageReader>
 #include <QFileInfo>
 #include <QDebug>
 #include "MainUI/MainApplication.h"
@@ -37,38 +39,40 @@
 
 #define DBG if(0)
 
-static const QStringList REDIRECT = QStringList() << "audio/mp4" << "video/mp4" << "audio/mpeg";
+static const QStringList REDIRECT = QStringList() << "audio/mp4" << "video/mp4" << "audio/mpeg" << "application/pdf";
+static const QByteArray JXL_MIME_TYPE = "image/jxl";
 
 URLSchemeHandler::URLSchemeHandler(QObject *parent)
-    : QWebEngineUrlSchemeHandler(parent)
+    : QWebEngineUrlSchemeHandler(parent),
+      can_polyfill_jxl(false)
 {
+    can_polyfill_jxl = QImageReader::supportedMimeTypes().contains(JXL_MIME_TYPE);
 }
 
 
 void URLSchemeHandler::requestStarted(QWebEngineUrlRequestJob *request)
 {
+    DBG qDebug() << "    ";
     DBG qDebug() << "In URLSchemeHandler with url: " << request->requestUrl();
     DBG qDebug() << "In URLSchemeHandler with method: " << request->requestMethod();
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
     DBG qDebug() << "In URLSchemeHandler with initiator: " << request->initiator();
-#endif
 
     QUrl url = request->requestUrl();
     QByteArray data;
     QString content_type;  // must NOT include ";charset=UTF-8"
-    if (url.hasQuery() && url.query().contains("sigilpreview=")) {
-        QString key = url.query();
-        key = key.mid(key.indexOf("=")+1);
+    QString key = url.toString();
+    MainApplication *mainApplication = qobject_cast<MainApplication *>(qApp);
+    QString xhtml = mainApplication->loadFromPreviewCache(key);
+    if (!xhtml.isEmpty()) {
         content_type = QString("application/xhtml+xml");
-        MainApplication *mainApplication = qobject_cast<MainApplication *>(qApp);
-        QString xhtml = mainApplication->loadFromPreviewCache(key);
         data = xhtml.toUtf8();
     } else {
         QUrl fileurl("file://" + url.path());
-        QString local_file =  fileurl.toLocalFile();
+        QString local_file = fileurl.toLocalFile();
         QFileInfo fi(local_file);
         if (fi.exists()) {
-            QString mt = MediaTypes::instance()->GetMediaTypeFromExtension(fi.suffix().toLower(), "");
+            // FIXME - use file contents to sniff for the best media-type instead of just file extension
+            QString mt = MediaTypes::instance().GetMediaTypeFromExtension(fi.suffix().toLower(), "application/octet-stream");
             content_type = mt;
 
             // Work around bug in QtWebEngine when using custom schemes that load audio and video resources
@@ -87,17 +91,27 @@ void URLSchemeHandler::requestStarted(QWebEngineUrlRequestJob *request)
             //
             // Since filling partial requests does not seem feasible in QtWebEngine without a whole
             // lot of effort, redirect them to use the url file: scheme so that the entire file gets requested
-            
+
             if (REDIRECT.contains(mt) && url.scheme() == "sigil") {
                 request->redirect(fileurl);
                 return;
             }
-            
-            QFile file(local_file);
-            if (file.open(QIODevice::ReadOnly)) {
-                data = file.readAll();
-                file.close();
+            if ((mt == QString::fromLatin1(JXL_MIME_TYPE)) && can_polyfill_jxl && (url.scheme() == "sigil")) {
+                QImage jxlfile(local_file);
+                QBuffer buffer(&data);
+                if (buffer.open(QIODevice::WriteOnly)) {
+                    jxlfile.save(&buffer, "JPG", 95);
+                }
+                content_type = "image/jpg";
+            } else {
+                QFile file(local_file);
+                if (file.open(QIODevice::ReadOnly)) {
+                    data = file.readAll();
+                    file.close();
+                }
             }
+        } else {
+            qDebug() << "URLSchemeHandler will fail request because no local file found: " << url;
         }
     }
     if (!data.isEmpty()) {

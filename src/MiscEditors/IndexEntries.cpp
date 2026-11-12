@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2020 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2012      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012      Dave Heiland
 **
@@ -25,37 +25,10 @@
 #include "MiscEditors/IndexEntries.h"
 #include "MiscEditors/IndexEditorModel.h"
 
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    #define QT_ENUM_SKIPEMPTYPARTS Qt::SkipEmptyParts
-    #define QT_ENUM_KEEPEMPTYPARTS Qt::KeepEmptyParts
-#else
-    #define QT_ENUM_SKIPEMPTYPARTS QString::SkipEmptyParts
-    #define QT_ENUM_KEEPEMPTYPARTS QString::KeepEmptyParts
-#endif
-
-IndexEntries *IndexEntries::m_instance = 0;
-
-IndexEntries *IndexEntries::instance()
-{
-    if (m_instance == 0) {
-        m_instance = new IndexEntries();
-    }
-
-    return m_instance;
-}
-
 IndexEntries::IndexEntries()
     :
     m_BookIndexRootItem(new QStandardItem())
 {
-}
-
-IndexEntries::~IndexEntries()
-{
-    if (m_instance) {
-        delete m_instance;
-        m_instance = 0;
-    }
 }
 
 QStandardItem *IndexEntries::GetRootItem()
@@ -66,7 +39,7 @@ QStandardItem *IndexEntries::GetRootItem()
 void IndexEntries::AddOneEntry(QString text, QString bookpath, QString index_id_value)
 {
     QStandardItem *parent_item = m_BookIndexRootItem;
-    QStringList names = text.split("/", QT_ENUM_SKIPEMPTYPARTS);
+    QStringList names = text.split("/", Qt::SkipEmptyParts);
     names.append(Utility::URLEncodePath(bookpath) + "#" +  Utility::URLEncodePath(index_id_value));
     // Add names in hierarchy
     foreach(QString name, names) {

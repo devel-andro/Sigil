@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2019  Kevin B. Hendricks, Stratford, ON, Canada
+**  Copyright (C) 2019-2026  Kevin B. Hendricks, Stratford, ON, Canada
 **
 **  This file is part of Sigil.
 **
@@ -26,7 +26,6 @@
 #include <QCoreApplication>
 #include <QHash>
 class QString;
-class QStringList;
 
 
 /**
@@ -41,15 +40,25 @@ class MediaTypes
     Q_DECLARE_TR_FUNCTIONS(MediaTypes)
 
 public:
+    static MediaTypes& instance() {
+        static MediaTypes the_instance;
+        return the_instance;
+    }
 
-    static MediaTypes *instance();
+    MediaTypes(const MediaTypes&) = delete;
+    MediaTypes& operator=(const MediaTypes&) = delete;
+    
     QString GetMediaTypeFromExtension(const QString &extension, const QString &fallback = "");
+    QString GetFileDataMimeType(const QString &absolute_file_path, const QString &fallback = "");
+    QString GetMediaTypeFromXML(const QString& absolute_file_path, const QString &fallback = "");
     QString GetGroupFromMediaType(const QString &mediatype, const QString &fallback = "");
     QString GetResourceDescFromMediaType(const QString &mediatype, const QString &fallback = "");
+    QString GetFileExtFromMediaType(const QString &media_type, const QString & fallback="");
 
 private:
 
     MediaTypes();
+    ~MediaTypes() = default;
 
     void SetExtToMTypeMap();
 
@@ -57,13 +66,16 @@ private:
 
     void SetMTypeToRDescMap();
 
+    void SetMTypeToExtMap();
+
     QHash<QString, QString> m_ExtToMType;
     
     QHash<QString, QString> m_MTypeToGroup;
 
     QHash<QString, QString>m_MTypeToRDesc;
+
+    QHash<QString, QString>m_MTypeToExt;
     
-    static MediaTypes *m_instance;
 };
 
 #endif // MEDIATYPES_H

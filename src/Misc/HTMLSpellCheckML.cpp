@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2020 Kevin B. Hendrickws, Stratford Ontario Canada
+**  Copyright (C) 2020-2026 Kevin B. Hendrickws, Stratford Ontario Canada
 **
 **  This file is part of Sigil.
 **
@@ -32,8 +32,7 @@ const QString ENTITYWORDCHARS = ";#01234567890abcdefABCDEFxX";
 QList<HTMLSpellCheckML::AWord> HTMLSpellCheckML::GetWordList(const QString &source, const QString & default_lang)
 {
     QList<HTMLSpellCheckML::AWord> wordlist;
-    SpellCheck *sc = SpellCheck::instance();
-    QString wc = sc->getWordChars() + QChar(0x00ad); // add in soft hyphen
+    QString wc = SpellCheck::instance().getWordChars() + QChar(0x00ad); // add in soft hyphen
     SettingsStore ss;
     bool use_nums = ss.spellCheckNumbers();
     QuickParser qp(source, default_lang);
@@ -59,10 +58,10 @@ void HTMLSpellCheckML::parse_text_into_words(QList<HTMLSpellCheckML::AWord> &wor
     bool in_invalid_word = false;
     int word_start = 0;
     QString text = QChar(' ') + parsetext + QChar(' ');
-    for (int i = 0; i < text.count(); i++) {
+    for (int i = 0; i < text.length(); i++) {
         QChar c = text.at(i);
         QChar prev_c = i > 0 ? text.at(i - 1) : QChar(' ');
-        QChar next_c = i < text.count() - 1 ? text.at(i + 1) : QChar(' ');
+        QChar next_c = i < text.length() - 1 ? text.at(i + 1) : QChar(' ');
         if (IsBoundary(prev_c, c, next_c, wc, use_nums)) {
             // If we're in an entity and we hit a boundary and it isn't
             // part of an entity then this is an invalid entity.
@@ -102,6 +101,7 @@ bool HTMLSpellCheckML::IsBoundary(QChar prev_c, QChar c, QChar next_c, const QSt
 {
         
     if (IsValidChar(c,use_nums) ) return false;
+    if (c == '.' && wordChars.contains(c)) return false;  // allow ending period for abbreviations
     // Single quotes of ' and curly version and hyphen/emdash are sometimes a boundary
     // and sometimes not, depending on whether they are surrounded by letters or not.
     // A sentence which 'has some text' should treat the ' as a boundary but didn't should not.

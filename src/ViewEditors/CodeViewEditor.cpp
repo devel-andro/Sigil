@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2021 Doug Massay
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2019-2026 Doug Massay
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2012      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012-2013 Dave Heiland
 **  Copyright (C) 2012      Grant Drake
@@ -26,19 +26,26 @@
 
 #include <memory>
 
-#include <QtCore/QFileInfo>
-#include <QtGui/QContextMenuEvent>
-#include <QtCore/QSignalMapper>
-#include <QtWidgets/QAction>
-#include <QtWidgets/QMenu>
-#include <QtGui/QPainter>
-#include <QtWidgets/QScrollBar>
-#include <QtWidgets/QShortcut>
-#include <QtCore/QXmlStreamReader>
+#include <QFileInfo>
+#include <QContextMenuEvent>
+#include <QSignalMapper>
+#include <QAction>
+#include <QMenu>
+#include <QPainter>
+#include <QPalette>
+#include <QColor>
+#include <QScrollBar>
+#include <QShortcut>
 #include <QRegularExpression>
 #include <QRegularExpressionMatch>
 #include <QRegularExpressionMatchIterator>
+#include <QString>
+#include <QStringView>
 #include <QPointer>
+#include <QPrinter>
+#include <QApplication>
+#include <QInputDialog>
+#include <QTimer>
 #include <QDebug>
 
 #include "BookManipulation/Book.h"
@@ -46,27 +53,21 @@
 #include "BookManipulation/XhtmlDoc.h"
 #include "MainUI/MainWindow.h"
 #include "Parsers/GumboInterface.h"
-// #include "Misc/XHTMLHighlighter.h"
+#include "Parsers/CSSToolbox.h"
 #include "Misc/XHTMLHighlighter2.h"
 #include "Dialogs/ClipEditor.h"
 #include "Misc/CSSHighlighter.h"
+#include "Misc/JSONHighlighter.h"
 #include "Misc/SettingsStore.h"
 #include "Misc/SpellCheck.h"
 #include "Misc/HTMLSpellCheck.h"
+#include "Misc/AriaRoles.h"
 #include "Misc/Utility.h"
 #include "Parsers/HTMLStyleInfo.h"
 #include "PCRE2/PCRECache.h"
 #include "ViewEditors/CodeViewEditor.h"
 #include "ViewEditors/LineNumberArea.h"
 #include "sigil_constants.h"
-
-#if QT_VERSION >= QT_VERSION_CHECK(6, 0, 0)
-    #define QT_ENUM_SKIPEMPTYPARTS Qt::SkipEmptyParts
-    #define QT_ENUM_KEEPEMPTYPARTS Qt::KeepEmptyParts
-#else
-    #define QT_ENUM_SKIPEMPTYPARTS QString::SkipEmptyParts
-    #define QT_ENUM_KEEPEMPTYPARTS QString::KeepEmptyParts
-#endif
 
 const int PROGRESS_BAR_MINIMUM_DURATION = 1000;
 const QString BREAK_TAG_INSERT    = "<hr class=\"sigil_split_marker\" />";
@@ -85,7 +86,7 @@ static const QString ATTRIB_VALUES_SEARCH   = "\"([^\"]*)";
 static const QString OPEN_TAG_STARTS_SELECTION = "^\\s*(<\\s*([a-zA-Z0-9]+)[^>]*>)";
 static const QString STARTING_INDENT_USED = "(^\\s*)[^\\s]";
 
-static const int MAX_SPELLING_SUGGESTIONS = 10;
+static const uint MAX_SPELLING_SUGGESTIONS = 10;
 
 
 CodeViewEditor::CodeViewEditor(HighlighterType high_type, bool check_spelling, QWidget *parent)
@@ -95,8 +96,8 @@ CodeViewEditor::CodeViewEditor(HighlighterType high_type, bool check_spelling, Q
     m_LastBlockCount(0),
     m_LineNumberAreaBlockNumber(-1),
     m_LineNumberArea(new LineNumberArea(this)),
-    m_ScrollOneLineUp(new QShortcut(QKeySequence(Qt::ControlModifier + Qt::Key_Up), this, 0, 0, Qt::WidgetShortcut)),
-    m_ScrollOneLineDown(new QShortcut(QKeySequence(Qt::ControlModifier + Qt::Key_Down), this, 0, 0, Qt::WidgetShortcut)),
+    m_ScrollOneLineUp(new QShortcut(QKeySequence(Qt::ControlModifier | Qt::Key_Up), this, 0, 0, Qt::WidgetShortcut)),
+    m_ScrollOneLineDown(new QShortcut(QKeySequence(Qt::ControlModifier | Qt::Key_Down), this, 0, 0, Qt::WidgetShortcut)),
     m_isLoadFinished(false),
     m_DelayedCursorScreenCenteringRequired(false),
     m_CaretUpdate(QList<ElementIndex>()),
@@ -114,16 +115,25 @@ CodeViewEditor::CodeViewEditor(HighlighterType high_type, bool check_spelling, Q
     m_ReplacingInMarkedText(false),
     m_regen_taglist(true)
 {
+    if (!qEnvironmentVariableIsSet("SIGIL_ALLOW_CODEVIEW_DROP")) setAcceptDrops(false);
     if (high_type == CodeViewEditor::Highlight_XHTML) {
         // m_Highlighter = new XHTMLHighlighter(check_spelling, this);
         m_Highlighter = new XHTMLHighlighter2(check_spelling, this);
     } else if (high_type == CodeViewEditor::Highlight_CSS) {
         m_Highlighter = new CSSHighlighter(this);
+    } else if (high_type == CodeViewEditor::Highlight_JSON) {
+        m_Highlighter = new JSONHighlighter(this);
     } else {
         m_Highlighter = NULL;
     }
 
-    setFocusPolicy(Qt::StrongFocus);
+
+    // if we use the following we can get instances
+    // of accidental insertion of tabs into CodeView
+    // when simply trying to shift focus
+    // setFocusPolicy(Qt::StrongFocus);
+    setFocusPolicy(Qt::ClickFocus);
+
     ConnectSignalsToSlots();
     SetAppearance();
 }
@@ -133,6 +143,30 @@ CodeViewEditor::~CodeViewEditor()
     m_ScrollOneLineUp->deleteLater();
     m_ScrollOneLineDown->deleteLater();
 }
+
+
+QString CodeViewEditor::cursor_selected_text(const QTextCursor& c) const
+{
+    QString txt = c.selectedText();
+    QChar *uc = txt.data();
+    QChar *e = uc + txt.size();
+    for (; uc != e; ++uc) {
+        switch (uc->unicode()) {
+            // pass QChar::ParagraphSeparator through unchanged for ApplyList to
+            // work properly and not create improperly nested code
+            case 0xfdd0: // QTextBeginningOfFrame
+            case 0xfdd1: // QTextEndOfFrame
+            case QChar::LineSeparator:
+                *uc = QLatin1Char('\n');
+                break;
+            default:
+            ;
+        }
+    }
+    txt = Utility::UseNFC(txt);
+    return txt;
+}
+
 
 void CodeViewEditor::SetAppearance()
 {
@@ -148,7 +182,10 @@ void CodeViewEditor::SetAppearance()
     SetAppearanceColors();
     UpdateLineNumberAreaMargin();
     HighlightCurrentLine(false);
-    setFrameStyle(QFrame::NoFrame);
+    // if we allow the default frame that matches style then focus highlight works
+    if (!settings.uiHighlightFocusWidgetEnabled()) {
+        setFrameStyle(QFrame::NoFrame);
+    }
     // Set the Zoom factor but be sure no signals are set because of this.
     m_CurrentZoomFactor = settings.zoomText();
     Zoom();
@@ -163,6 +200,7 @@ QSize CodeViewEditor::sizeHint() const
 
 void CodeViewEditor::CustomSetDocument(TextDocument &ndocument)
 {
+    SettingsStore settings;
     setDocument(&ndocument);
     ndocument.setModified(false);
     if (m_Highlighter) {
@@ -179,6 +217,7 @@ void CodeViewEditor::CustomSetDocument(TextDocument &ndocument)
     ResetFont();
     m_isLoadFinished = true;
     m_regen_taglist = true;
+    if (settings.uiDoubleWidthTextCursor()) setCursorWidth(2);
     emit DocumentSet();
 }
 
@@ -248,6 +287,47 @@ void CodeViewEditor::HighlightMarkedText()
     setExtraSelections(extraSelections);
 }
 
+
+// mimic the impact of wrap around to search either above or below where the
+// original search started in that file
+bool CodeViewEditor::MoveToSplitText(Searchable::Direction direction, int start, int end)
+{
+    if (start < 0 || end <=0 || start >= end) {
+        return false;
+    }
+
+    int pos = textCursor().position();
+    int start_pos = textCursor().selectionStart();
+    int end_pos = textCursor().selectionEnd();
+
+    bool moved = false;
+    if (direction == Searchable::Direction_Up) {
+        if (end_pos > start && end_pos <= end) {
+            return true;
+        }
+        if (pos <= start) {
+            pos = end;
+            moved = true;
+        }
+    } else {
+        if (start_pos >= start && start_pos < end) {
+            return true;
+        }
+        if (pos >= end) {
+            pos = start;
+            moved = true;
+        }
+    }
+
+    if (moved) {
+        QTextCursor cursor = textCursor();
+        cursor.setPosition(pos);
+        setTextCursor(cursor);
+    }
+    return moved;
+}
+
+
 bool CodeViewEditor::IsMarkedText()
 {
     return m_MarkedTextStart >= 0 && m_MarkedTextEnd > 0;
@@ -294,14 +374,14 @@ void CodeViewEditor::CutCodeTags()
 
     QTextCursor cursor = textCursor();
     int start = cursor.selectionStart();
-    QString selected_text = textCursor().selectedText();
+    QString selected_text = cursor_selected_text(textCursor());
     QString new_text = StripCodeTags(selected_text);
     cursor.beginEditBlock();
     cursor.removeSelectedText();
     cursor.insertText(new_text);
     cursor.endEditBlock();
     cursor.setPosition(start);
-    cursor.setPosition(start + new_text.count(), QTextCursor::KeepAnchor);
+    cursor.setPosition(start + new_text.length(), QTextCursor::KeepAnchor);
     setTextCursor(cursor);
 }
 
@@ -415,7 +495,7 @@ QString CodeViewEditor::StripCodeTags(QString text)
     bool in_tag = false;
 
     // Remove anything between and including < and >
-    for (int i = 0; i < text.count(); i++) {
+    for (int i = 0; i < text.length(); i++) {
         QChar c = text.at(i);
 
         if (!in_tag && c != QChar('<')) {
@@ -630,22 +710,18 @@ int CodeViewEditor::CalculateLineNumberAreaWidth()
         num_digits++;
     }
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
     return LINE_NUMBER_MARGIN * 2 + fontMetrics().horizontalAdvance(QChar('0')) * num_digits;
-#else
-    return LINE_NUMBER_MARGIN * 2 + fontMetrics().width(QChar('0')) * num_digits;
-#endif
-
 }
 
 
 void CodeViewEditor::ReplaceDocumentText(const QString &new_text)
 {
+    QString txt = Utility::UseNFC(new_text);
     QTextCursor cursor = textCursor();
     cursor.beginEditBlock();
     cursor.select(QTextCursor::Document);
     cursor.removeSelectedText();
-    cursor.insertText(new_text);
+    cursor.insertText(txt);
     cursor.endEditBlock();
     m_regen_taglist = true; // just in case
 }
@@ -738,11 +814,32 @@ QString CodeViewEditor::toPlainText() const
 // overrides createMimeDataFromSelection()
 QMimeData *CodeViewEditor::createMimeDataFromSelection() const
 { 
-  QString selected_text = textCursor().selectedText();
-  selected_text = selected_text.replace(QChar::ParagraphSeparator, '\n');
-  QMimeData* md = new QMimeData();
-  md->setText(selected_text);
-  return md;
+    QString selected_text = cursor_selected_text(textCursor());
+    selected_text = selected_text.replace(QChar::ParagraphSeparator, '\n');
+    QMimeData* md = new QMimeData();
+    md->setText(selected_text);
+    return md;
+}
+
+// overrides insertFromMimeData(const QMimeData* source)
+void CodeViewEditor::insertFromMimeData(const QMimeData* source)
+{
+    if (source->hasText() || source->hasHtml()) {
+        QMimeData nmd;
+        if (source->hasText()) {
+            QString txt = source->text();
+            txt = Utility::UseNFC(txt);
+            nmd.setText(txt);
+        }
+        if (source->hasHtml()) {
+            QString ht = source->html();
+            ht = Utility::UseNFC(ht);
+            nmd.setHtml(ht);
+        }
+        QPlainTextEdit::insertFromMimeData(&nmd);
+    } else {
+        QPlainTextEdit::insertFromMimeData(source);
+    }
 }
 
 bool CodeViewEditor::IsLoadingFinished()
@@ -771,6 +868,36 @@ int CodeViewEditor::GetCursorColumn() const
     const QTextBlock block = cursor.block();
     const int column = cursor.position() - block.position() + 1;
     return column;
+}
+
+int CodeViewEditor::GetCursorCodepoint() const
+{
+    int pos = GetCursorPosition();
+    QString src = toPlainText();
+    if ((pos >= 0) && (pos < src.length())) {
+        QChar c = src.at(pos);
+	if (!c.isSurrogate()) {
+	    return (int) c.unicode();
+	}
+        if (c.isHighSurrogate()) {
+	    if (pos + 1 < src.length()) {
+	        QChar c2 = src.at(pos+1);
+		if (c2.isLowSurrogate()) {
+		    return (int) QChar::surrogateToUcs4(c, c2);
+		}
+	    }
+	    return -1;
+	} else if (c.isLowSurrogate()) {
+	    if (pos - 1 >= 0) {
+	        QChar c2 = src.at(pos-1);
+		if (c2.isHighSurrogate()) {
+		    return (int) QChar::surrogateToUcs4(c2, c);
+		}
+	    }
+	    return -1;
+	}
+    }
+    return -1;
 }
 
 
@@ -839,14 +966,18 @@ bool CodeViewEditor::FindNext(const QString &search_regex,
                               bool misspelled_words,
                               bool ignore_selection_offset,
                               bool wrap,
-                              bool marked_text)
+                              bool marked_text,
+                              int split_at)
 {
-    SPCRE *spcre = PCRECache::instance()->getObject(search_regex);
+    SPCRE *spcre = PCRECache::instance().getObject(search_regex);
     SPCRE::MatchInfo match_info;
     QString txt = toPlainText();
     int start_offset = 0;
     int start = 0;
     int end = txt.length();
+    bool moved_to_split = false;
+    int original_pos = -1;
+
     if (marked_text) {
         if (!MoveToMarkedText(search_direction, wrap)) {
             return false;
@@ -855,6 +986,24 @@ bool CodeViewEditor::FindNext(const QString &search_regex,
         end = m_MarkedTextEnd;
         start_offset = m_MarkedTextStart;
     }
+
+    // treat split_at as if it was the marked region to mimic
+    // the impact of wrap around, split will always be -1 if
+    // marked text is being used and in all Current File Mode searches
+    if (split_at != -1) {
+        original_pos = textCursor().position(); 
+        if (search_direction == Searchable::Direction_Up) {
+            start = split_at;
+        } else {
+            end = split_at;
+        }
+        start_offset = start;
+        if (!MoveToSplitText(search_direction, start, end)) {
+            return false;
+        }
+        moved_to_split = true;
+    }
+
     int selection_offset = GetSelectionOffset(search_direction, ignore_selection_offset, marked_text);
 
     if (search_direction == Searchable::Direction_Up) {
@@ -865,11 +1014,10 @@ bool CodeViewEditor::FindNext(const QString &search_regex,
         }
     } else {
         if (misspelled_words) {
-            match_info = GetMisspelledWord(txt, selection_offset, txt.count(), search_regex, search_direction);
+            match_info = GetMisspelledWord(txt, selection_offset, txt.length(), search_regex, search_direction);
         } else {
             match_info = spcre->getFirstMatchInfo(Utility::Substring(selection_offset, end, txt));
         }
-
         start_offset = selection_offset;
     }
 
@@ -877,6 +1025,14 @@ bool CodeViewEditor::FindNext(const QString &search_regex,
         // If not in marked text it's not a real match.
         if (match_info.offset.second + start_offset > m_MarkedTextEnd ||
             match_info.offset.first + start_offset < m_MarkedTextStart) {
+            match_info.offset.first = -1;
+        }
+    }
+
+    if (split_at != -1) {
+        // If not in split range it's not a real match.
+        if (match_info.offset.second + start_offset > end ||
+            match_info.offset.first + start_offset < start) {
             match_info.offset.first = -1;
         }
     }
@@ -898,17 +1054,23 @@ bool CodeViewEditor::FindNext(const QString &search_regex,
             return true;
         }
     }
-
+    // nothing found
+    if (moved_to_split) {
+        // restore original pos since nothing found
+        QTextCursor cursor = textCursor();
+        cursor.setPosition(original_pos);
+        setTextCursor(cursor);
+    }
     return false;
 }
 
 
 int CodeViewEditor::Count(const QString &search_regex, Searchable::Direction direction, bool wrap, bool marked_text)
 {
-    SPCRE *spcre = PCRECache::instance()->getObject(search_regex);
-    QString text= toPlainText();
+    SPCRE *spcre = PCRECache::instance().getObject(search_regex);
+    QString txt= toPlainText();
     int start = 0;
-    int end = text.length();
+    int end = txt.length();
 
     if (marked_text) {
         if (!MoveToMarkedText(direction, wrap)) {
@@ -919,20 +1081,20 @@ int CodeViewEditor::Count(const QString &search_regex, Searchable::Direction dir
     }
     if (!wrap) {
         if (direction == Searchable::Direction_Up) {
-            text = Utility::Substring(start, textCursor().position(), text);
+            txt = Utility::Substring(start, textCursor().position(), txt);
         } else {
-            text = Utility::Substring(textCursor().position(), end, text);
+            txt = Utility::Substring(textCursor().position(), end, txt);
         }
     } else if (marked_text) {
-        text = Utility::Substring(start, end, text);
+        txt = Utility::Substring(start, end, txt);
     }
-    return spcre->getEveryMatchInfo(text).count();
+    return spcre->getEveryMatchInfo(txt).count();
 }
 
 
 bool CodeViewEditor::ReplaceSelected(const QString &search_regex, const QString &replacement, Searchable::Direction direction, bool replace_current)
 {
-    SPCRE *spcre = PCRECache::instance()->getObject(search_regex);
+    SPCRE *spcre = PCRECache::instance().getObject(search_regex);
     int selection_start = textCursor().selectionStart();
     int selection_end = textCursor().selectionEnd();
 
@@ -943,7 +1105,9 @@ bool CodeViewEditor::ReplaceSelected(const QString &search_regex, const QString 
     }
 
     // Convert to plain text or \s won't get newlines
-    const QString &document_text = toPlainText();
+    // assume already NFC normalized by earlier find
+    const QString document_text = toPlainText();
+    
     QString selected_text = Utility::Substring(selection_start, selection_end, document_text);
     QString replaced_text;
     bool replacement_made = false;
@@ -1022,7 +1186,7 @@ int CodeViewEditor::ReplaceAll(const QString &search_regex,
     }
     int marked_text_length = text.length();
 
-    SPCRE *spcre = PCRECache::instance()->getObject(search_regex);
+    SPCRE *spcre = PCRECache::instance().getObject(search_regex);
     QList<SPCRE::MatchInfo> match_info = spcre->getEveryMatchInfo(text);
 
     // Run though all match offsets making the replacement in reverse order.
@@ -1097,7 +1261,7 @@ void CodeViewEditor::ResetLastFindMatch()
 
 QString CodeViewEditor::GetSelectedText()
 {
-    return textCursor().selectedText();
+    return cursor_selected_text(textCursor());
 }
 
 void CodeViewEditor::SetUpFindForSelectedText(const QString &search_regex)
@@ -1128,7 +1292,7 @@ void CodeViewEditor::SetUpFindForSelectedText(const QString &search_regex)
 // method is not a slot, and we need it as a slot
 // for print preview support; so this is just
 // a slot wrapper around that function
-void CodeViewEditor::print(QPagedPaintDevice *printer)
+void CodeViewEditor::print(QPrinter *printer)
 {
     QPlainTextEdit::print(printer);
 }
@@ -1181,8 +1345,20 @@ void CodeViewEditor::mouseDoubleClickEvent(QMouseEvent *event)
     bool isAlt = QApplication::keyboardModifiers() & Qt::AltModifier;
     // qDebug() << "Modifiers: " << QApplication::keyboardModifiers();
 
-    if (!isShift && !isAlt) return;
-
+    if (!isShift && !isAlt) {
+        // standard select word - but workaround lack on intl support in that feature
+        QString standard_selection = cursor.selectedText();
+        QRegularExpression select_word("(\\w+)", QRegularExpression::UseUnicodePropertiesOption);
+        QRegularExpressionMatch match = select_word.match(standard_selection);
+        if (match.hasMatch()) {
+            int startOffset = match.capturedStart(1);
+            int endOffset = match.capturedEnd(1);
+            cursor.setPosition(pos + startOffset);
+            cursor.setPosition(pos + endOffset, QTextCursor::KeepAnchor);
+            setTextCursor(cursor);
+        }
+        return;
+    }
     if (!IsPositionInTag(pos)){
         return;
     }
@@ -1279,6 +1455,7 @@ void CodeViewEditor::contextMenuEvent(QContextMenuEvent *event)
     
     if (m_reformatCSSEnabled) {
         AddReformatCSSContextMenu(menu);
+        AddCSSClassContextMenu(menu);
     }
 
     if (m_reformatHTMLEnabled) {
@@ -1287,6 +1464,7 @@ void CodeViewEditor::contextMenuEvent(QContextMenuEvent *event)
 
     AddMarkSelectionMenu(menu);
     AddGoToLinkOrStyleContextMenu(menu);
+    AddToggleLineWrapModeContextMenu(menu);
     AddClipContextMenu(menu);
 
     if (m_checkSpelling) {
@@ -1340,13 +1518,12 @@ bool CodeViewEditor::AddSpellCheckContextMenu(QMenu *menu)
 
         // If a misspelled word is selected try to offer spelling suggestions.
         if (offer_spelling) {
-            SpellCheck *sc = SpellCheck::instance();
-            QStringList suggestions = sc->suggestPS(selected_word);
+            QStringList suggestions = SpellCheck::instance().suggestPS(selected_word);
             QAction *suggestAction = 0;
 
             // We want to limit the number of suggestions so we don't
             // get a huge context menu.
-            for (int i = 0; i < std::min(suggestions.length(), MAX_SPELLING_SUGGESTIONS); ++i) {
+            for (unsigned int i = 0; i < std::min(static_cast<uint>(suggestions.length()), MAX_SPELLING_SUGGESTIONS); ++i) {
                 suggestAction = new QAction(suggestions.at(i), menu);
                 connect(suggestAction, SIGNAL(triggered()), m_spellingMapper, SLOT(map()));
                 m_spellingMapper->setMapping(suggestAction, suggestions.at(i));
@@ -1377,7 +1554,7 @@ bool CodeViewEditor::AddSpellCheckContextMenu(QMenu *menu)
             }
 
             // Allow the user to select a dictionary
-            QStringList dictionaries = sc->userDictionaries();
+            QStringList dictionaries = SpellCheck::instance().userDictionaries();
             QMenu *dictionary_menu = new QMenu(menu);
             dictionary_menu->setTitle(tr("Add To Dictionary"));
 
@@ -1429,7 +1606,7 @@ QString CodeViewEditor::GetCurrentWordAtCaret(bool select_word)
                     c.setPosition(c.block().position() + r.start);
                     c.movePosition(QTextCursor::Right, QTextCursor::KeepAnchor, r.length);
                     setTextCursor(c);
-                    return c.selectedText();
+                    return cursor_selected_text(c);
                 } else {
                     return toPlainText().mid(c.block().position() + r.start, r.length);
                 }
@@ -1442,7 +1619,7 @@ QString CodeViewEditor::GetCurrentWordAtCaret(bool select_word)
         int selLen = c.selectionEnd() - c.block().position() - selStart;
         foreach(QTextLayout::FormatRange r, textCursor().block().layout()->formats()) {
             if (r.start == selStart && selLen == r.length && r.format.underlineStyle() == QTextCharFormat::WaveUnderline/*QTextCharFormat::SpellCheckUnderline*/) {
-                return c.selectedText();
+                return cursor_selected_text(c);
             }
         }
     }
@@ -1477,6 +1654,29 @@ void CodeViewEditor::AddReformatCSSContextMenu(QMenu *menu)
         menu->insertSeparator(topAction);
     }
 }
+
+
+void CodeViewEditor::AddCSSClassContextMenu(QMenu *menu)
+{
+    QAction *topAction = 0;
+
+    if (!menu->actions().isEmpty()) {
+        topAction = menu->actions().at(0);
+    }
+
+    QString text = tr("Rename Selected Class");
+    QAction *renameClassAction = new QAction(text, menu);
+
+    if (textCursor().hasSelection() && textCursor().selectedText().startsWith(".")) {
+        if (!topAction) {
+            menu->addAction(renameClassAction);
+        } else {
+	       menu->insertAction(topAction, renameClassAction);
+        }
+    }
+    connect(renameClassAction, SIGNAL(triggered()), this, SLOT(RenameClassClicked()));
+}
+
 
 void CodeViewEditor::AddReformatHTMLContextMenu(QMenu *menu)
 {
@@ -1529,6 +1729,28 @@ void CodeViewEditor::AddGoToLinkOrStyleContextMenu(QMenu *menu)
     }
 
     connect(goToLinkOrStyleAction, SIGNAL(triggered()), this, SLOT(GoToLinkOrStyleAction()));
+
+    if (topAction) {
+        menu->insertSeparator(topAction);
+    }
+}
+
+void CodeViewEditor::AddToggleLineWrapModeContextMenu(QMenu *menu)
+{
+    QAction *topAction = 0;
+
+    if (!menu->actions().isEmpty()) {
+        topAction = menu->actions().at(0);
+    }
+
+    QAction *toggleLineWrapModeAction = new QAction(tr("Toggle Line Wrap Mode"), menu);
+    if (!topAction) {
+        menu->addAction(toggleLineWrapModeAction);
+    } else {
+        menu->insertAction(topAction, toggleLineWrapModeAction);
+    }
+
+    connect(toggleLineWrapModeAction, SIGNAL(triggered()), this, SLOT(ToggleLineWrapMode()));
 
     if (topAction) {
         menu->insertSeparator(topAction);
@@ -1606,7 +1828,7 @@ void CodeViewEditor::AddClipContextMenu(QMenu *menu)
         menu->addMenu(clips_menu);
     }
 
-    CreateMenuEntries(clips_menu, 0, ClipEditorModel::instance()->invisibleRootItem());
+    CreateMenuEntries(clips_menu, 0, ClipEditorModel::instance().invisibleRootItem());
 
     QAction *saveClipAction = new QAction(tr("Add To Clips") + "...", menu);
 
@@ -1638,7 +1860,7 @@ bool CodeViewEditor::CreateMenuEntries(QMenu *parent_menu, QAction *topAction, Q
         if (!item->data().toBool()) {
             clipAction = new QAction(item->text(), parent_menu);
             connect(clipAction, SIGNAL(triggered()), m_clipMapper, SLOT(map()));
-            m_clipMapper->setMapping(clipAction, ClipEditorModel::instance()->GetFullName(item));
+            m_clipMapper->setMapping(clipAction, ClipEditorModel::instance().GetFullName(item));
 
             if (!topAction) {
                 parent_menu->addAction(clipAction);
@@ -1685,7 +1907,10 @@ bool CodeViewEditor::InViewableImage()
         // We do not know what namespace may have been used
         url_name = GetAttribute("xlink:href", IMAGE_TAGS, true);
     }
-
+    // check if CV is editing an SVGTab and allow it
+    if (url_name.isEmpty()) {
+        if (m_mediatype == "image/svg+xml") return true;
+    }
     return !url_name.isEmpty();
 }
 
@@ -1724,12 +1949,18 @@ void CodeViewEditor::GoToLinkOrStyle()
         url_name = GetAttribute("xlink:href", IMAGE_TAGS, true);
     }
 
+    if (url_name.isEmpty() && m_mediatype == "image/svg+xml") {
+        url_name = "./SVGTab.svg";
+    }
+    
     if (!url_name.isEmpty()) {
         
         QUrl url = QUrl(url_name);
         QString extension = url_name.right(url_name.length() - url_name.lastIndexOf('.') - 1).toLower();
 
         if (IMAGE_EXTENSIONS.contains(extension)) {
+            emit ViewImage(QUrl(url_name));
+        } else if (SVG_EXTENSIONS.contains(extension)) {
             emit ViewImage(QUrl(url_name));
         } else {
             emit LinkClicked(QUrl(url_name));
@@ -1786,6 +2017,62 @@ void CodeViewEditor::IgnoreMisspelledWord()
             ignoreWord(selected_word);
             emit SpellingHighlightRefreshRequest();
         }
+    }
+}
+
+void CodeViewEditor::RenameClassClicked()
+{
+    QTimer::singleShot(20,this,SLOT(RenameClass()));
+}
+
+void CodeViewEditor::RenameClass()
+{
+    QWidget *mainWindow_w = Utility::GetMainWindow();
+    MainWindow *mainWindow = qobject_cast<MainWindow *>(mainWindow_w);
+    if (!mainWindow) {
+	    Utility::DisplayStdErrorDialog("Could not determine main window.");
+        return;
+    }
+
+    int lineno = textCursor().blockNumber() + 1;
+
+    QString aclassname = textCursor().selectedText();
+    if (aclassname.startsWith('.')) aclassname = aclassname.mid(1,-1);
+    QString cssdata = toPlainText();
+    CSSToolbox tb;
+    QSet<QString> classnames = tb.generate_class_set(cssdata);
+    if (aclassname.isEmpty() || !classnames.contains(aclassname)) {
+        emit ShowStatusMessageRequest(tr("Selected Text is not a valid class name."));
+        return;
+    }
+
+    // get the new name
+    QString newname;
+    QInputDialog dinput;
+    dinput.setWindowTitle(tr("Rename Class"));
+    dinput.setLabelText(tr("Enter new class name"));
+    if (dinput.exec()) {
+        newname = dinput.textValue().trimmed();
+    }
+    if (newname.startsWith('.')) newname = newname.mid(1, -1);
+    if (newname.isEmpty()) return;
+
+    // rename the class in all xhtml files that use this css file
+    // MainWindow can get current tab to get css resource currently loaded
+    if (mainWindow->RenameClassInHtml(aclassname, newname)) {
+        // rename the class in this css file
+        QString newcssdata = tb.rename_class_in_css(aclassname, newname, cssdata);
+        if (cssdata != newcssdata) {
+            QTextCursor cursor = textCursor();
+            cursor.beginEditBlock();
+            cursor.select(QTextCursor::Document);
+            cursor.insertText(newcssdata);
+            cursor.endEditBlock();
+            ScrollToLine(lineno);
+        }
+        emit ShowStatusMessageRequest(tr("Class renamed."));
+    } else {
+        emit ShowStatusMessageRequest(tr("Class rename aborted."));
     }
 }
 
@@ -1846,7 +2133,12 @@ bool CodeViewEditor::IsInsertIdAllowed()
 
     // Only allow if the closing tag we're in is an "a" tag
     QString closing_tag_name = GetClosingTagName(pos);
-
+    // special case of cursor immediately before ending tag |</tag>
+    if (!closing_tag_name.isEmpty()) {
+        if (m_TagList.getSource().at(pos) == '<') {
+            closing_tag_name = "";
+        }
+    }
     if (!closing_tag_name.isEmpty() && !ANCHOR_TAGS.contains(closing_tag_name)) {
         return false;
     }
@@ -1861,6 +2153,28 @@ bool CodeViewEditor::IsInsertIdAllowed()
     return true;
 }
 
+QString CodeViewEditor::GetCurrentSingleOrOpenTagName()
+{
+    int pos = textCursor().selectionStart();
+    return GetOpeningTagName(pos);
+}
+
+bool CodeViewEditor::IsInsertRoleAllowed()
+{
+    int pos = textCursor().selectionStart();
+
+    if (!IsPositionInBody(pos)) {
+        return false;
+    }
+
+    // Only allow if in opening or single tag
+    QString tag_name = GetOpeningTagName(pos);
+
+    if (tag_name.isEmpty()) return false;
+
+    return true;
+}
+
 bool CodeViewEditor::IsInsertHyperlinkAllowed()
 {
     int pos = textCursor().selectionStart();
@@ -1871,6 +2185,12 @@ bool CodeViewEditor::IsInsertHyperlinkAllowed()
 
     // Only allow if the closing tag we're in is an "a" tag
     QString closing_tag_name = GetClosingTagName(pos);
+    // special case of cursor immediately before ending tag |</tag>
+    if (!closing_tag_name.isEmpty()) {
+        if (m_TagList.getSource().at(pos) == '<') {
+            closing_tag_name = "";
+        }
+    }
 
     if (!closing_tag_name.isEmpty() && !ANCHOR_TAGS.contains(closing_tag_name)) {
         return false;
@@ -1913,6 +2233,29 @@ bool CodeViewEditor::InsertId(const QString &attribute_value)
     return InsertTagAttribute(element_name, attribute_name, attribute_value, tag_list);
 }
 
+bool CodeViewEditor::InsertRole(const QString &attribute_value)
+{
+    int pos = textCursor().selectionStart();
+    QString element_name = GetOpeningTagName(pos);
+    QString attribute_name = "role";
+    QStringList tag_list = AriaRoles::instance().AllowedTags(attribute_value);
+    QString etype = AriaRoles::instance().EpubTypeMapping(attribute_value);
+    if (etype == attribute_value) {
+        // this is an epub:type only attribute
+        attribute_name = "epub:type";
+        return InsertTagAttribute(element_name, attribute_name, attribute_value, tag_list);
+    }
+    // This could have both aria role and epub:type
+    bool rv = InsertTagAttribute(element_name, attribute_name, attribute_value, tag_list);
+    if (rv) { 
+        if (!etype.isEmpty()) {
+            attribute_name = "epub:type";
+            InsertTagAttribute(element_name, attribute_name, etype, tag_list);
+        }
+    }
+    return rv;
+}
+
 bool CodeViewEditor::InsertHyperlink(const QString &attribute_value)
 {
     const QString &element_name = "a";
@@ -1942,7 +2285,9 @@ bool CodeViewEditor::InsertTagAttribute(const QString &element_name,
     }
 
     // If nothing was inserted, then just insert a new tag with no text as long as we aren't in a tag
-    if (!textCursor().hasSelection() && !IsPositionInTag(textCursor().position())) {
+    int pos = textCursor().position();
+    bool in_tag_not_before = IsPositionInTag(pos) && (m_TagList.getSource().at(pos) != '<');
+    if (!textCursor().hasSelection() && !in_tag_not_before) {
         InsertHTMLTagAroundText(element_name, "/" % element_name, attribute_name % "=\"" % attribute_value % "\"", "");
         inserted = true;
     } else if (TextIsSelectedAndNotInStartOrEndTag()) {
@@ -1965,7 +2310,7 @@ bool CodeViewEditor::MarkForIndex(const QString &title)
     safe_title.replace(">", "&gt;");
 
     bool ok = true;
-    QString selected_text = textCursor().selectedText();
+    QString selected_text = cursor_selected_text(textCursor());
     const QString &element_name = "a";
     const QString &attribute_name = "class";
 
@@ -1992,11 +2337,11 @@ bool CodeViewEditor::MarkForIndex(const QString &title)
 // Overridden so we can emit the FocusGained() signal.
 void CodeViewEditor::focusInEvent(QFocusEvent *event)
 {
-    // Why is this needed?
-    // RehighlightDocument();
     emit FocusGained(this);
     QPlainTextEdit::focusInEvent(event);
     HighlightCurrentLine(false);
+    SettingsStore settings;
+    if (settings.uiDoubleWidthTextCursor()) setCursorWidth(2);
 }
 
 
@@ -2037,11 +2382,13 @@ void CodeViewEditor::TextChangedFilter()
 
 void CodeViewEditor::RehighlightDocument()
 {
-    if (!isVisible()) {
-        return;
-    }
+    // need to be able to rehighlight the document
+    // even if it is not visibile (ie not in the active tab in TabManager)
+    // to handle theme changes
+    // if (!isVisible()) {
+    //     return;
+    // }
 
-    // Is this needed,  Why not let it work asynchronously
     if (m_Highlighter) {
         // We block signals from the document while highlighting takes place,
         // because we do not want the contentsChanged() signal to be fired
@@ -2049,11 +2396,14 @@ void CodeViewEditor::RehighlightDocument()
         XHTMLHighlighter2* xhl = qobject_cast<XHTMLHighlighter2*>(m_Highlighter);
         // XHTMLHighlighter* xhl = qobject_cast<XHTMLHighlighter*>(m_Highlighter);
         CSSHighlighter* chl = qobject_cast<CSSHighlighter*>(m_Highlighter);
+        JSONHighlighter* jhl = qobject_cast<JSONHighlighter*>(m_Highlighter);
         document()->blockSignals(true);
         if (xhl) {
             xhl->do_rehighlight();
         } else if (chl) {
             chl->do_rehighlight();
+        } else if (jhl) {
+            jhl->do_rehighlight();
         }
         document()->blockSignals(false);
     }
@@ -2095,7 +2445,7 @@ void CodeViewEditor::MaybeRegenerateTagList()
     // if (!m_isLoadFinished) return;
     
     if (m_regen_taglist) {
-        qDebug() << "regenerating tag list";
+        // qDebug() << "regenerating tag list";
         m_TagList.reloadLister(toPlainText());
         m_regen_taglist = false;
     }
@@ -2209,7 +2559,12 @@ void CodeViewEditor::HighlightCurrentLine(bool highlight_tags)
     }
 
     setExtraSelections(extraSelections);
+    // still want to force a UI update in mainWindow but do not want to reset
+    // any last match info as that would invalidate search settings
+    // so disconnect this locally,  emit,  and then reconnect
+    disconnect(this, SIGNAL(selectionChanged()), this, SLOT(ResetLastFindMatch()));
     emit selectionChanged();
+    connect(this, SIGNAL(selectionChanged()), this, SLOT(ResetLastFindMatch()));
 }
 
 
@@ -2252,22 +2607,19 @@ void CodeViewEditor::addToUserDictionary(const QString &text)
 {
     QString word = text.split("\t")[0];
     QString dict_name = text.split("\t")[1];
-    SpellCheck *sc = SpellCheck::instance();
-    sc->addToUserDictionary(word, dict_name);
+    SpellCheck::instance().addToUserDictionary(word, dict_name);
     emit SpellingHighlightRefreshRequest();
 }
 
 void CodeViewEditor::addToDefaultDictionary(const QString &text)
 {
-    SpellCheck *sc = SpellCheck::instance();
-    sc->addToUserDictionary(text);
+    SpellCheck::instance().addToUserDictionary(text);
     emit SpellingHighlightRefreshRequest();
 }
 
 void CodeViewEditor::ignoreWord(const QString &text)
 {
-    SpellCheck *sc = SpellCheck::instance();
-    sc->ignoreWord(text);
+    SpellCheck::instance().ignoreWord(text);
     emit SpellingHighlightRefreshRequest();
 }
 
@@ -2278,7 +2630,7 @@ void CodeViewEditor::PasteText(const QString &text)
 
 bool CodeViewEditor::PasteClipNumber(int clip_number)
 {
-    ClipEditorModel::clipEntry *clip = ClipEditorModel::instance()->GetEntryFromNumber(clip_number);
+    ClipEditorModel::clipEntry *clip = ClipEditorModel::instance().GetEntryFromNumber(clip_number);
     if (!clip) {
         return false;
     }
@@ -2300,16 +2652,23 @@ bool CodeViewEditor::PasteClipEntries(const QList<ClipEditorModel::clipEntry *> 
 
 void CodeViewEditor::PasteClipEntryFromName(const QString &name)
 {
-    ClipEditorModel::clipEntry *clip = ClipEditorModel::instance()->GetEntryFromName(name);
+    ClipEditorModel::clipEntry *clip = ClipEditorModel::instance().GetEntryFromName(name);
     PasteClipEntry(clip);
 }
 
 bool CodeViewEditor::PasteClipEntry(ClipEditorModel::clipEntry *clip)
 {
-    if (!clip || clip->text.isEmpty()) {
+    if (!clip) {
         return false;
     }
+    return PasteClipText(clip->text);
+}
 
+bool CodeViewEditor::PasteClipText(const QString& cliptext)
+{
+    if (cliptext.isEmpty()) {
+        return false;
+    }
     QTextCursor cursor = textCursor();
     // Convert to plain text or \s won't get newlines
     const QString &document_text = toPlainText();
@@ -2318,7 +2677,7 @@ bool CodeViewEditor::PasteClipEntry(ClipEditorModel::clipEntry *clip)
     if (selected_text.isEmpty()) {
         // Allow users to use the same entry for insert/replace
         // Will not handle complicated regex, but good for tags like <p>\1</p>
-        QString replacement_text = clip->text;
+        QString replacement_text = cliptext;
         replacement_text.remove(QString("\\1"));
         cursor.beginEditBlock();
         cursor.removeSelectedText();
@@ -2334,12 +2693,11 @@ bool CodeViewEditor::PasteClipEntry(ClipEditorModel::clipEntry *clip)
         bool found = FindNext(search_regex, Searchable::Direction_Down, false, false, false);
 
         if (found) {
-            ReplaceSelected(search_regex, clip->text, Searchable::Direction_Down, true);
+            ReplaceSelected(search_regex, cliptext, Searchable::Direction_Down, true);
         }
         cursor.setPosition(cursor.selectionEnd());
         setTextCursor(cursor);
     }
-
     return true;
 }
 
@@ -2350,11 +2708,7 @@ void CodeViewEditor::ResetFont()
     // But just in case, say we want a fixed width font if font is not present
     font.setStyleHint(QFont::TypeWriter);
     setFont(font);
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
     setTabStopDistance(TAB_SPACES_WIDTH * QFontMetrics(font).horizontalAdvance(' '));
-#else
-    setTabStopWidth(TAB_SPACES_WIDTH * QFontMetrics(font).width(' '));
-#endif
     UpdateLineNumberAreaFont(font);
 }
 
@@ -2368,9 +2722,13 @@ void CodeViewEditor::UpdateLineNumberAreaFont(const QFont &font)
 
 void CodeViewEditor::SetAppearanceColors()
 {
-
-    QPalette app_pal = qApp->palette();
-    setPalette(app_pal);
+    // This is required for times when F&R steals focus temporarily from CodeView
+    QPalette our_pal = qApp->palette();
+    QColor active_highlight = our_pal.color(QPalette::Active, QPalette::Highlight);
+    QColor active_highlightedtext = our_pal.color(QPalette::Active, QPalette::HighlightedText);
+    our_pal.setColor(QPalette::Inactive, QPalette::Highlight, active_highlight);
+    our_pal.setColor(QPalette::Inactive, QPalette::HighlightedText, active_highlightedtext);
+    setPalette(our_pal);
     return;
 }
 
@@ -2426,7 +2784,6 @@ int CodeViewEditor::GetSelectionOffset(Searchable::Direction search_direction, b
     return offset;
 }
 
-
 void CodeViewEditor::ScrollByLine(bool down)
 {
     int current_scroll_value = verticalScrollBar()->value();
@@ -2452,87 +2809,44 @@ QList<ElementIndex> CodeViewEditor::GetCaretLocation()
     // We search for the first opening tag *behind* the caret.
     // This specifies the element the caret is located in.
     int pos = textCursor().position();
-    int offset = 0;
-    int len = 0;
-    QRegularExpression tag(XML_OPENING_TAG);
-    QRegularExpressionMatchIterator i = tag.globalMatch(toPlainText());
-    // There is no way to search for the last match (str.lastIndexOf) in a string and also have
-    // the matched text length. So we search forward for every match (QRegularExpression doesn't
-    // have a way to search backwards) and only use the last match's info.
-    while (i.hasNext()) {
-        QRegularExpressionMatch mo = i.next();
-        int start = mo.capturedStart();
-        if (start > pos) {
-            break;
-        }
-        offset = start;
-        len = mo.capturedLength();
+    MaybeRegenerateTagList();
+    // default to top if not well formed to see Preview error message
+    QString qwebpath = "html 1, body -1";
+    if (XhtmlDoc::IsDataWellFormed(m_TagList.getSource())) {
+        qwebpath = m_TagList.GeneratePathToTag(pos);
     }
-    QList<ElementIndex> hierarchy = ConvertStackToHierarchy(GetCaretLocationStack(offset + len));
-
+    // qDebug() << "qwebpath: " << qwebpath;
+    QList<ElementIndex> hierarchy = ConvertQWebPathToHierarchy(qwebpath);
     // determine last block element containing caret
     QString element_name;
     foreach(ElementIndex ei, hierarchy) {
         if (BLOCK_LEVEL_TAGS.contains(ei.name)) {
-        element_name = ei.name;
+            element_name = ei.name;
         }
     }
     m_element_name = element_name;
-
     return hierarchy;
 }
-
 
 void CodeViewEditor::StoreCaretLocationUpdate(const QList<ElementIndex> &hierarchy)
 {
     m_CaretUpdate = hierarchy;
 }
 
-
-QStack<CodeViewEditor::StackElement> CodeViewEditor::GetCaretLocationStack(int offset) const
+QList<ElementIndex> CodeViewEditor::ConvertQWebPathToHierarchy(const QString & webpath) const
 {
-    QString source = toPlainText();
-    QXmlStreamReader reader(source);
-    QStack<StackElement> stack;
-
-    while (!reader.atEnd()) {
-        reader.readNext();
-
-        if (reader.isStartElement()) {
-            // If we detected the start of a new element, then
-            // the element currently on the top of the stack
-            // has one more child element
-            if (!stack.isEmpty()) {
-                stack.top().num_children++;
-            }
-
-            StackElement new_element;
-            new_element.name         = reader.name().toString();
-            new_element.num_children = 0;
-            stack.push(new_element);
-
-            // Check if this is the element start tag
-            // we are looking for
-            if (reader.characterOffset() == offset) {
-                break;
-            }
-        }
-        // If we detect the end tag of an element,
-        // we remove it from the top of the stack
-        else if (reader.isEndElement()) {
-            stack.pop();
-        }
+    // The location element hierarchy encoded in a string
+    QString location_string = webpath;
+    QStringList elements    = location_string.split(",", Qt::SkipEmptyParts);
+    QList<ElementIndex> location;
+    foreach(QString element, elements) {
+        ElementIndex new_element;
+        new_element.name  = element.split(" ")[ 0 ];
+        new_element.index = element.split(" ")[ 1 ].toInt();
+        location.append(new_element);
     }
-
-    if (reader.hasError()) {
-        // Just return an empty location.
-        // Maybe we could return the stack we currently have?
-        return QStack<StackElement>();
-    }
-
-    return stack;
+    return location;
 }
-
 
 QString CodeViewEditor::ConvertHierarchyToQWebPath(const QList<ElementIndex>& hierarchy) const
 {
@@ -2543,20 +2857,6 @@ QString CodeViewEditor::ConvertHierarchyToQWebPath(const QList<ElementIndex>& hi
     }
     return pathparts.join(",");
 }
-
-
-QList<ElementIndex> CodeViewEditor::ConvertStackToHierarchy(const QStack<StackElement> stack) const
-{
-    QList<ElementIndex> hierarchy;
-    foreach(StackElement stack_element, stack) {
-        ElementIndex new_element;
-        new_element.name  = stack_element.name;
-        new_element.index = stack_element.num_children - 1;
-        hierarchy.append(new_element);
-    }
-    return hierarchy;
-}
-
 
 std::tuple<int, int> CodeViewEditor::ConvertHierarchyToCaretMove(const QList<ElementIndex> &hierarchy) const
 {
@@ -2583,10 +2883,9 @@ std::tuple<int, int> CodeViewEditor::ConvertHierarchyToCaretMove(const QList<Ele
     return std::make_tuple(line - cursor.blockNumber(), col);
 }
 
-
 bool CodeViewEditor::ExecuteCaretUpdate(bool default_to_top)
 {
-    // If there's a cursor/caret update waiting (from BookView),
+    // If there's a cursor/caret update waiting (from Preview),
     // we update the caret location and reset the update variable
     if (m_CaretUpdate.isEmpty()) {
         if (default_to_top) {
@@ -2597,7 +2896,6 @@ bool CodeViewEditor::ExecuteCaretUpdate(bool default_to_top)
 
         return false;
     }
-
     QTextCursor cursor(document());
     int vertical_lines_move = 0;
     int horizontal_chars_move = 0;
@@ -2605,14 +2903,7 @@ bool CodeViewEditor::ExecuteCaretUpdate(bool default_to_top)
     // conversion uses toPlainText(), and the text needs to up-to-date.
     std::tie(vertical_lines_move, horizontal_chars_move) = ConvertHierarchyToCaretMove(m_CaretUpdate);
     cursor.movePosition(QTextCursor::NextBlock, QTextCursor::MoveAnchor, vertical_lines_move - 1);
-
-    for (int i = 1 ; i < horizontal_chars_move ; i++) {
-        cursor.movePosition(QTextCursor::NextCharacter , QTextCursor::MoveAnchor);
-        // TODO: cursor.movePosition( QTextCursor::Left, ...) is badly bugged in Qt 4.7.
-        // Test whether it's fixed when the next version of Qt comes out.
-        // cursor.movePosition( QTextCursor::Left, QTextCursor::MoveAnchor, horizontal_chars_move );
-    }
-
+    cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::MoveAnchor, horizontal_chars_move);
     m_CaretUpdate.clear();
     setTextCursor(cursor);
     m_DelayedCursorScreenCenteringRequired = true;
@@ -2630,7 +2921,7 @@ void CodeViewEditor::FormatBlock(const QString &element_name, bool preserve_attr
     if (!textCursor().hasSelection()) {
         QTextCursor newcursor(textCursor());
         newcursor.select(QTextCursor::LineUnderCursor);
-        QString newtxt = newcursor.selectedText();
+        QString newtxt = cursor_selected_text(newcursor);
         int startpos = newcursor.selectionStart();
         QString cleantxt(newtxt);
         cleantxt = cleantxt.trimmed();
@@ -2686,7 +2977,7 @@ void CodeViewEditor::FormatBlock(const QString &element_name, bool preserve_attr
             }
 
             // if we reached here we have an opening block tag we need to replace
-            QStringRef opening_tag_text(&text, ti.pos, ti.len);
+            QStringView opening_tag_text = QStringView(text).sliced(ti.pos, ti.len);
             QString all_attributes = TagLister::extractAllAttributes(opening_tag_text);
             
             // look for matching closing tag from here to the end
@@ -2751,7 +3042,7 @@ void CodeViewEditor::InsertHTMLTagAroundSelection(const QString &left_element_na
         new_attributes.prepend(" ");
     }
 
-    const QString &selected_text = cursor.selectedText();
+    const QString &selected_text = cursor_selected_text(cursor);
     const QString &prefix_text = "<" % left_element_name % new_attributes % ">";
     const QString &replacement_text = prefix_text % selected_text % "<" % right_element_name % ">";
     int selection_start = cursor.selectionStart();
@@ -2935,7 +3226,7 @@ void CodeViewEditor::FormatSelectionWithinElement(const QString &element_name, i
     } else {
         QString opening_tag = text.mid(tb.pos, tb.len);
         QString closing_tag = text.mid(te.pos, te.len);
-        QString replacement_text = cursor.selectedText();
+        QString replacement_text = cursor_selected_text(cursor);
         cursor.beginEditBlock();
         int new_selection_end = selection_end;
         int new_selection_start = selection_start;
@@ -3005,7 +3296,7 @@ CodeViewEditor::StyleTagElement CodeViewEditor::GetSelectedStyleTagElement()
     
     int i = m_TagList.findLastTagOnOrBefore(pos);
     TagLister::TagInfo ti = m_TagList.at(i);
-    QStringRef tagstring(&text, ti.pos, ti.len);
+    QStringView tagstring = QStringView(text).sliced(ti.pos, ti.len);
     element.name = ti.tname;
 
     TagLister::AttInfo attr;
@@ -3124,6 +3415,8 @@ QString CodeViewEditor::ProcessAttribute(const QString &attribute_name,
         while (pos > 0 && text[pos] != QChar('<')) {
             pos--;
         }
+        // special case: cursor just before closing < so move back by 1 to be in text.
+        if (pos > 0) pos--; 
     }
     if (pos < 0) return QString();
 
@@ -3153,7 +3446,7 @@ QString CodeViewEditor::ProcessAttribute(const QString &attribute_name,
         i--;
     }     
     if ((i < 0) || !tag_list.contains(ti.tname) || (ti.tname == "body")) return QString();
-    QStringRef opening_tag_text(&text, ti.pos, ti.len);
+    QStringView opening_tag_text = QStringView(text).sliced(ti.pos, ti.len);
 
     // Now look for the attribute, which may or may not already exist
     TagLister::AttInfo ainfo;
@@ -3163,6 +3456,7 @@ QString CodeViewEditor::ProcessAttribute(const QString &attribute_name,
     // qDebug() << " found attribute: " << ainfo.aname << ainfo.avalue << ainfo.pos << ainfo.len;
     // set absolute attribute start and end locations in text
     int attribute_start = ti.pos + ti.len - 1;  // right before the tag '>'
+    if (ti.ttype == "single") attribute_start--; // right before the single tag '/'s
     int attribute_end = attribute_start;
     if (ainfo.pos != -1) {
         // attribute exists
@@ -3397,17 +3691,16 @@ void CodeViewEditor::ReformatHTML(bool all, bool to_valid)
         return;
     }
     QString version = mainWindow->GetCurrentBook()->GetConstOPF()->GetEpubVersion();
-
+    
     if (all) {
         mainWindow->GetCurrentBook()->ReformatAllHTML(to_valid);
-
     } else {
         original_text = toPlainText();
 
         if (to_valid) {
             new_text = CleanSource::Mend(original_text, version);
         } else {
-            new_text = CleanSource::MendPrettify(original_text, version);
+            new_text = mainWindow->GetCurrentBook()->SafePrettyPrint(m_bookpath, original_text);
         }
 
         if (original_text != new_text) {
@@ -3464,7 +3757,7 @@ bool CodeViewEditor::IsSelectionValid(const QString & text)
 void CodeViewEditor::WrapSelectionInElement(const QString& element, bool unwrap)
 {
     QTextCursor cursor = textCursor();
-    const QString selected_text = cursor.selectedText();
+    const QString selected_text = cursor_selected_text(cursor);
 
     if (selected_text.isEmpty()) {
         return;
@@ -3524,7 +3817,7 @@ void CodeViewEditor::WrapSelectionInElement(const QString& element, bool unwrap)
 void CodeViewEditor::ApplyListToSelection(const QString &element)
 {
     QTextCursor cursor = textCursor();
-    const QString selected_text = cursor.selectedText();
+    const QString selected_text = cursor_selected_text(cursor);
 
     if (selected_text.isEmpty()) {
         return;
@@ -3554,7 +3847,7 @@ void CodeViewEditor::ApplyListToSelection(const QString &element)
         new_text = new_text.trimmed();
         // now split remaining text by new lines and 
         // remove any beginning and ending li tags
-        QStringList alist = new_text.split(QChar::ParagraphSeparator, QT_ENUM_SKIPEMPTYPARTS);
+        QStringList alist = new_text.split(QChar::ParagraphSeparator, Qt::SkipEmptyParts);
         QStringList result;
         foreach(QString aitem, alist) {
             result.append(indent + RemoveLastTag(RemoveFirstTag(aitem,"li"), "li"));
@@ -3563,7 +3856,7 @@ void CodeViewEditor::ApplyListToSelection(const QString &element)
         new_text = result.join("\n");
     }
     else if ((tagname == "p") || tagname.isEmpty()) {
-        QStringList alist = new_text.split(QChar::ParagraphSeparator, QT_ENUM_SKIPEMPTYPARTS);
+        QStringList alist = new_text.split(QChar::ParagraphSeparator, Qt::SkipEmptyParts);
         QStringList result;
         result.append(indent + "<" + element + ">");
         foreach(QString aitem, alist) {
@@ -3590,7 +3883,7 @@ void CodeViewEditor::ApplyListToSelection(const QString &element)
 void CodeViewEditor::ApplyCaseChangeToSelection(const Utility::Casing &casing)
 {
     QTextCursor cursor = textCursor();
-    const QString selected_text = cursor.selectedText();
+    const QString selected_text = cursor_selected_text(cursor);
 
     if (selected_text.isEmpty()) {
         return;
@@ -3743,6 +4036,15 @@ void CodeViewEditor::SelectAndScrollIntoView(int start_position, int end_positio
     emit PageClicked();
 }
 
+void CodeViewEditor::ToggleLineWrapMode()
+{
+    if (lineWrapMode() == QPlainTextEdit::NoWrap) {
+        setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    } else {
+        setLineWrapMode(QPlainTextEdit::NoWrap);
+    }
+}
+
 void CodeViewEditor::ConnectSignalsToSlots()
 {
     connect(this, SIGNAL(blockCountChanged(int)), this, SLOT(UpdateLineNumberAreaMargin()));
@@ -3755,9 +4057,9 @@ void CodeViewEditor::ConnectSignalsToSlots()
     connect(this, SIGNAL(selectionChanged()), this, SLOT(ResetLastFindMatch()));
     connect(m_ScrollOneLineUp,   SIGNAL(activated()), this, SLOT(ScrollOneLineUp()));
     connect(m_ScrollOneLineDown, SIGNAL(activated()), this, SLOT(ScrollOneLineDown()));
-    connect(m_spellingMapper, SIGNAL(mapped(const QString &)), this, SLOT(InsertText(const QString &)));
-    connect(m_addSpellingMapper, SIGNAL(mapped(const QString &)), this, SLOT(addToDefaultDictionary(const QString &)));
-    connect(m_addDictMapper, SIGNAL(mapped(const QString &)), this, SLOT(addToUserDictionary(const QString &)));
-    connect(m_ignoreSpellingMapper, SIGNAL(mapped(const QString &)), this, SLOT(ignoreWord(const QString &)));
-    connect(m_clipMapper, SIGNAL(mapped(const QString &)), this, SLOT(PasteClipEntryFromName(const QString &)));
+    connect(m_spellingMapper, SIGNAL(mappedString(const QString &)), this, SLOT(InsertText(const QString &)));
+    connect(m_addSpellingMapper, SIGNAL(mappedString(const QString &)), this, SLOT(addToDefaultDictionary(const QString &)));
+    connect(m_addDictMapper, SIGNAL(mappedString(const QString &)), this, SLOT(addToUserDictionary(const QString &)));
+    connect(m_ignoreSpellingMapper, SIGNAL(mappedString(const QString &)), this, SLOT(ignoreWord(const QString &)));
+    connect(m_clipMapper, SIGNAL(mappedString(const QString &)), this, SLOT(PasteClipEntryFromName(const QString &)));
 }

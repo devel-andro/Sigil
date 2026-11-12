@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -22,13 +22,15 @@
 
 #include "EmbedPython/EmbeddedPython.h"
 
-#include <QtCore/QFileInfo>
-#include <QtWidgets/QApplication>
-#include <QtWidgets/QHeaderView>
-#include <QtWidgets/QTableWidget>
+#include <QFileInfo>
+#include <QApplication>
+#include <QHeaderView>
+#include <QTableWidget>
 #include <QRegularExpression>
 #include <QVariant>
 #include <QFileDialog>
+#include <QPaintEvent>
+#include <QStylePainter>
 
 #include "BookManipulation/Book.h"
 #include "BookManipulation/FolderKeeper.h"
@@ -110,10 +112,7 @@ void ValidationResultsView::ExportAll()
     }
     QString default_filter = file_filters.value("csv");
 
-    QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions();
 
     QString filename = QFileDialog::getSaveFileName(this,
                                                     tr("Export Validation Results"),
@@ -161,6 +160,36 @@ void ValidationResultsView::showEvent(QShowEvent *event)
 }
 
 
+void ValidationResultsView::paintEvent(QPaintEvent *event)
+{
+    // Allow title text to be set independently of tab text
+    // (when QDockWidget is tabified).
+    QStylePainter painter(this);
+
+    if (isFloating()) {
+        QStyleOptionFrame options;
+        options.initFrom(this);
+
+#ifdef Q_OS_MAC
+        // This is needed for Qt6 but works on Qt5 as well
+        options.palette = QApplication::palette();
+#endif
+
+        painter.drawPrimitive(QStyle::PE_FrameDockWidget, options);
+    }
+    QStyleOptionDockWidget options;
+    initStyleOption(&options);
+    options.title = windowTitle();
+
+#ifdef Q_OS_MAC
+    // This is needed for Qt6 but works on Qt5 as well
+    options.palette = QApplication::palette();
+#endif
+
+    painter.drawControl(QStyle::CE_DockWidgetTitle, options);
+}
+
+
 QStringList ValidationResultsView::ValidateFile(QString &apath)
 {
     int rv = 0;
@@ -170,9 +199,7 @@ QStringList ValidationResultsView::ValidateFile(QString &apath)
     QList<QVariant> args;
     args.append(QVariant(apath));
 
-    EmbeddedPython * epython  = EmbeddedPython::instance();
-
-    QVariant res = epython->runInPython( QString("sanitycheck"),
+    QVariant res = EmbeddedPython::instance().runInPython( QString("sanitycheck"),
                                          QString("perform_sanity_check"),
                                          args,
                                          &rv,
@@ -302,6 +329,7 @@ void ValidationResultsView::SetUpTable()
 
 void ValidationResultsView::DisplayResults(const QList<ValidationResult> &results)
 {
+    emit ShowMessageRequest(tr("Updating Validation Results"));
     m_ResultTable->clear();
     m_NoProblems = false;
 

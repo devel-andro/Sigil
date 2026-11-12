@@ -1,6 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2021 Kevin B. Hendricks, Stratford, Ontario Canada
+**  Copyright (C) 2019-2026 Kevin B. Hendricks, Stratford, Ontario Canada
+**  Copyright (C) 2019-2026 Doug Massay
 **  Copyright (C) 2011      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012      Dave Heiland
 **
@@ -117,11 +118,22 @@ PreferencesWidget::ResultActions GeneralSettingsWidget::saveSettings()
     settings.setClipboardHistoryLimit(int(ui.clipLimitSpin->value()));
     settings.setTempFolderHome(new_temp_folder_home);
     settings.setDisableGPU(new_disable_gpu);
-    // if you change this setting you need to restart sigil to see the change
+    // if you changed disable gpu you need to restart sigil to see the change
     if (new_disable_gpu != m_disable_gpu) {
         results = results | PreferencesWidget::ResultAction_RestartSigil;
     }
+    // if you change javascript on you need to restart sigil to see the change
+    if (new_javascript_on_level != m_javascriptOn) {
+        results = results | PreferencesWidget::ResultAction_RestartSigil;
+    }
+    // if you changed remote access on you need to restart sigil to see the change
+    if (new_remote_on_level != m_remoteOn) {
+        results = results | PreferencesWidget::ResultAction_RestartSigil;
+    }
+    settings.setSkipPrintPreview(ui.chkSkipPrintPreview->isChecked());
+    settings.setPrintDPI(ui.cboPrintDPI->currentText().toInt());
     settings.setExternalXEditorPath(new_xeditor_path);
+    settings.setFileDropZoneEnabled(ui.useFileDrop->isChecked());
     if (m_refreshClipboardHistoryLimit) {
         results = results | PreferencesWidget::ResultAction_RefreshClipHistoryLimit;
     }
@@ -131,6 +143,7 @@ PreferencesWidget::ResultActions GeneralSettingsWidget::saveSettings()
 
 void GeneralSettingsWidget::readSettings()
 {
+    ui.cboPrintDPI->addItems({ "72", "96", "168", "300", "600", "1200" });
     SettingsStore settings;
     QString version = settings.defaultVersion();
     ui.EpubVersion2->setChecked(version == "2.0");
@@ -146,17 +159,28 @@ void GeneralSettingsWidget::readSettings()
     int cleanOn = settings.cleanOn();
     ui.MendOnOpen->setChecked(cleanOn & CLEANON_OPEN);
     ui.MendOnSave->setChecked(cleanOn & CLEANON_SAVE);
-    int remoteOn = settings.remoteOn();
-    ui.AllowRemote->setChecked(remoteOn);
-    int javascriptOn = settings.javascriptOn();
-    ui.AllowJavascript->setChecked(javascriptOn);
+    m_remoteOn = settings.remoteOn();
+    ui.AllowRemote->setChecked(m_remoteOn);
+    m_javascriptOn = settings.javascriptOn();
+    ui.AllowJavascript->setChecked(m_javascriptOn);
     ui.clipLimitSpin->setValue(int(settings.clipboardHistoryLimit()));
     QString temp_folder_home = settings.tempFolderHome();
     ui.lineEdit->setText(temp_folder_home);
     m_disable_gpu = settings.disableGPU();
     ui.DisableGPU->setChecked(m_disable_gpu);
+    ui.chkSkipPrintPreview->setChecked(settings.skipPrintPreview());
+    int index = ui.cboPrintDPI->findText(QString::number(settings.printDPI()));
+    if (index == -1) {
+        index = ui.cboPrintDPI->findText("300");
+        if (index == -1) {
+            index = 0;
+        }
+    }
+    ui.cboPrintDPI->setCurrentIndex(index);
     QString xeditor_path = settings.externalXEditorPath();
     ui.lineEdit7->setText(xeditor_path);
+    bool showdropzone = settings.fileDropZoneEnabled();
+    ui.useFileDrop->setChecked(showdropzone);
 }
 
 void GeneralSettingsWidget::clearXEditorPath()
@@ -182,10 +206,9 @@ void GeneralSettingsWidget::setXEditorPath()
 #endif
       ;
 
-#ifdef Q_OS_MAC
-    QFileDialog::Options options = QFileDialog::Options() | QFileDialog::ReadOnly;
-#else
-    QFileDialog::Options options = QFileDialog::Options() | QFileDialog::ReadOnly | QFileDialog::HideNameFilterDetails;
+    QFileDialog::Options options = Utility::DlgOptions("MacUseNative") | QFileDialog::ReadOnly;
+#ifndef Q_OS_MAC
+    options = options | QFileDialog::HideNameFilterDetails;
 #endif
 
     // Qt Bug - you must use a native FileDialog on macOS otherwise it treats .app as a normal directory
@@ -195,7 +218,9 @@ void GeneralSettingsWidget::setXEditorPath()
                                                        NAME_FILTER,
                                                        0,
                                                        options);
-    ui.lineEdit7->setText(xeditorPath);
+    if (!xeditorPath.isEmpty()) {
+        ui.lineEdit7->setText(xeditorPath);
+    }
 }
 
 void GeneralSettingsWidget::XEditorPathChanged()
@@ -220,10 +245,7 @@ void GeneralSettingsWidget::autoTempFolder()
 
 void GeneralSettingsWidget::setTempFolder()
 {
-    QFileDialog::Options options = QFileDialog::Options() | QFileDialog::ShowDirsOnly;
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions() | QFileDialog::ShowDirsOnly;
 
     QString name = QFileDialog::getExistingDirectory(this, 
                                                      tr("Select Folder for Temporary Files"),

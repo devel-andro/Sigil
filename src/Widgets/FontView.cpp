@@ -1,6 +1,6 @@
 /************************************************************************
  **
- **  Copyright (C) 2020-2021 Kevin B. Hendricks
+ **  Copyright (C) 2020-2026 Kevin B. Hendricks
  **
  **  This file is part of Sigil.
  **
@@ -25,8 +25,10 @@
 #include <QGuiApplication>
 #include <QUrl>
 #include <QVBoxLayout>
-#include <QtWebEngineWidgets/QWebEngineProfile>
-#include <QtWebEngineWidgets/QWebEngineView>
+#include <QtWebEngineWidgets>
+#include <QtWebEngineCore>
+#include <QWebEngineProfile>
+#include <QWebEngineView>
 #include <QGuiApplication>
 #include <QApplication>
 #include <QFont>
@@ -35,6 +37,7 @@
 
 #include "ViewEditors/SimplePage.h"
 #include "Misc/Utility.h"
+#include "Misc/WebProfileMgr.h"
 #include "Widgets/FontView.h"
 
 static const QString FONT_HTML_BASE =
@@ -74,7 +77,8 @@ FontView::FontView(QWidget *parent)
       m_WebView(new QWebEngineView(this)),
       m_layout(new QVBoxLayout(this))
 {
-    m_WebView->setPage(new SimplePage(m_WebView));
+    QWebEngineProfile* profile = WebProfileMgr::instance().GetOneTimeProfile();
+    m_WebView->setPage(new SimplePage(profile, m_WebView));
     m_WebView->setContextMenuPolicy(Qt::NoContextMenu);
     m_WebView->setFocusPolicy(Qt::NoFocus);
     m_WebView->setAcceptDrops(false);

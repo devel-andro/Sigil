@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2020 Kevin Hendricks, Statford, ON 
+**  Copyright (C) 2015-2026 Kevin Hendricks, Statford, ON
 **  Copyright (C) 2012      Dave Heiland
 **  Copyright (C) 2012      John Schember <john@nachtimwald.com>
 **
@@ -26,6 +26,8 @@
 #include <QtWidgets/QFileDialog>
 #include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
+#include <QImage>
+#include <QPixmap>
 
 #include "sigil_exception.h"
 #include "BookManipulation/FolderKeeper.h"
@@ -106,10 +108,17 @@ void ImageFilesWidget::SetupTable(int sort_column, Qt::SortOrder sort_order)
     double total_size = 0;
     int total_links = 0;
     QHash<QString, QStringList> image_html_files_hash = m_Book->GetHTMLFilesUsingImages();
+    QHash<QString, QStringList> image_html2_files_hash = m_Book->GetHTMLFilesUsingMediaInStyleUrls();
+    QHash<QString, QStringList> image_css_files_hash = m_Book->GetCSSFilesUsingUrls();
     foreach(Resource * resource, m_AllImageResources) {
         QString filepath = resource->GetRelativePath();
         QString path = resource->GetFullPath();
-        QImage image(path);
+        QImage image;
+        if (resource->Type() == Resource::SVGResourceType) {
+            image = Utility::RenderSvgToImage(path);
+        } else {
+            image.load(path);
+        }
         QList<QStandardItem *> rowItems;
         // Filename
         QStandardItem *name_item = new QStandardItem();
@@ -120,33 +129,39 @@ void ImageFilesWidget::SetupTable(int sort_column, Qt::SortOrder sort_order)
         // File Size
         double ffsize = QFile(path).size() / 1024.0;
         total_size += ffsize;
-        QString fsize = QString::number(ffsize, 'f', 2);
+        QString fsize = QLocale().toString(ffsize, 'f', 2);
         NumericItem *size_item = new NumericItem();
         size_item->setText(fsize);
-        size_item->setTextAlignment(Qt::AlignRight);
+        size_item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         rowItems << size_item;
         // Times Used
-        QStringList image_html_files = image_html_files_hash[filepath];
-        total_links += image_html_files.count();
+        QStringList image_usage = image_html_files_hash.value(filepath, QStringList());
+        image_usage << image_html2_files_hash.value(filepath, QStringList());
+        image_usage << image_css_files_hash.value(filepath, QStringList());
+        int use_count = image_usage.count();
+        total_links += use_count;
         NumericItem *link_item = new NumericItem();
-        link_item->setText(QString::number(image_html_files.count()));
-
-        if (!image_html_files.isEmpty()) {
-            link_item->setToolTip(image_html_files.join("\n"));
+        link_item->setText(QString::number(use_count));
+        link_item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        if (!image_usage.isEmpty()) {
+            link_item->setToolTip(image_usage.join("\n"));
         }
 
         rowItems << link_item;
         // Width
         NumericItem *width_item = new NumericItem();
-        width_item->setText(QString::number(image.width()));
+        width_item->setText(QString("%L1").arg(image.width()));
+        width_item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         rowItems << width_item;
         // Height
         NumericItem *height_item = new NumericItem();
-        height_item->setText(QString::number(image.height()));
+        height_item->setText(QString("%L1").arg(image.height()));
+        height_item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         rowItems << height_item;
         // Pixels
         NumericItem *pixel_item = new NumericItem();
-        pixel_item->setText(QString::number(image.width() * image.height()));
+        pixel_item->setText(QString("%L1").arg(image.width() * image.height()));
+        pixel_item->setTextAlignment(Qt::AlignRight | Qt::AlignVCenter);
         rowItems << pixel_item;
         // Color
         QStandardItem *color_item = new QStandardItem();
@@ -154,15 +169,13 @@ void ImageFilesWidget::SetupTable(int sort_column, Qt::SortOrder sort_order)
         rowItems << color_item;
 
         // Thumbnail
+        QPixmap pixmap = QPixmap::fromImage(image);
         if (m_ThumbnailSize) {
-            QPixmap pixmap(resource->GetFullPath());
-
             if (pixmap.height() > m_ThumbnailSize || pixmap.width() > m_ThumbnailSize) {
                 pixmap = pixmap.scaled(QSize(m_ThumbnailSize, m_ThumbnailSize), Qt::KeepAspectRatio);
             }
-
             QStandardItem *icon_item = new QStandardItem();
-            icon_item->setIcon(QIcon(pixmap));
+            icon_item->setData(QVariant(pixmap), Qt::DecorationRole);
             rowItems << icon_item;
         }
 
@@ -319,10 +332,7 @@ void ImageFilesWidget::Save()
     QString filter_string = "*.csv;;*.txt;;*.*";
     QString default_filter = "";
     QString save_path = m_LastDirSaved + "/" + m_LastFileSaved;
-    QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions();
 
     QString destination = QFileDialog::getSaveFileName(this,
                                                        tr("Save Report As Comma Separated File"),
@@ -338,7 +348,7 @@ void ImageFilesWidget::Save()
     try {
         Utility::WriteUnicodeTextFile(data, destination);
     } catch (CannotOpenFile&) {
-        QMessageBox::warning(this, tr("Sigil"), tr("Cannot save report file."));
+        Utility::warning(this, tr("Sigil"), tr("Cannot save report file."));
     }
 
     m_LastDirSaved = QFileInfo(destination).absolutePath();

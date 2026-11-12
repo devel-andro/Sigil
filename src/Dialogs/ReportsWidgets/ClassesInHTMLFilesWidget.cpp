@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford, Ontario, Canada
 **  Copyright (C) 2012      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012      Dave Heiland
 **
@@ -31,6 +31,7 @@
 #include "sigil_constants.h"
 #include "sigil_exception.h"
 #include "BookManipulation/FolderKeeper.h"
+#include "BookManipulation/XhtmlDoc.h"
 #include "Dialogs/ReportsWidgets/ClassesInHTMLFilesWidget.h"
 #include "Parsers/CSSInfo.h"
 #include "Misc/NumericItem.h"
@@ -131,12 +132,14 @@ void ClassesInHTMLFilesWidget::AddTableData(const QList<BookReports::StyleData *
         // Selector
         QStandardItem *selector_text_item = new QStandardItem();
         selector_text_item->setText(class_usage->css_selector_text);
+        selector_text_item->setData(class_usage->css_selector_position);
         rowItems << selector_text_item;
         // Found in
         QStandardItem *found_in_item = new QStandardItem();
         QString css_short_filename = class_usage->css_filename;
         css_short_filename = css_short_filename.right(css_short_filename.length() - css_short_filename.lastIndexOf('/') - 1);
         found_in_item->setText(css_short_filename);
+        found_in_item->setData(class_usage->css_filename);
         found_in_item->setToolTip(class_usage->css_filename);
         rowItems << found_in_item;
 
@@ -179,13 +182,37 @@ void ClassesInHTMLFilesWidget::FilterEditTextChangedSlot(const QString &text)
         ui.fileTree->setCurrentIndex(QModelIndex());
     }
 }
-
 void ClassesInHTMLFilesWidget::DoubleClick()
 {
     QModelIndex index = ui.fileTree->selectionModel()->selectedRows(0).first();
-    QString bookpath = m_ItemModel->itemFromIndex(index)->data().toString();
-    emit OpenFileRequest(bookpath, 1, -1);
+#if 0
+    // target bookpath is found in found_in_tem in its data field (currently in column 4)
+    // target position is found in selector_text_item in its data field (current in column 3)
+    QString found_bookpath = m_ItemModel->itemFromIndex(index.sibling(index.row(), 4))->data().toString();
+    int pos = m_ItemModel->itemFromIndex(index.sibling(index.row(), 3))->data().toInt();
+    if (pos >= 0) {
+        emit OpenFileRequest(found_bookpath, -1, pos);
+    }
+#else
+    QString source;
+    // target bookpath is found in filename item in its data field (currently in column 0)
+    // target class_name is found class name item in its text field (current in column 3)
+    QString bookpath = m_ItemModel->itemFromIndex(index.sibling(index.row(), 0))->data().toString();
+    QString class_name = m_ItemModel->itemFromIndex(index.sibling(index.row(), 2))->text();
+    Resource * res = m_Book->GetFolderKeeper()->GetResourceByBookPathNoThrow(bookpath);
+    if (res) {
+        HTMLResource *htmlresource = qobject_cast<HTMLResource *>(res);
+        if (htmlresource) {
+            source = htmlresource->GetText();
+        }
+    }
+    int lineno = XhtmlDoc::GetFirstUseOfClass(source, class_name);
+    if (lineno >= 0) {
+        emit OpenFileRequest(bookpath, lineno, -1);
+    }
+#endif
 }
+
 
 void ClassesInHTMLFilesWidget::Save()
 {
@@ -223,10 +250,7 @@ void ClassesInHTMLFilesWidget::Save()
     QString filter_string = "*.csv;;*.txt;;*.*";
     QString default_filter = "";
     QString save_path = m_LastDirSaved + "/" + m_LastFileSaved;
-    QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions();
 
     QString destination = QFileDialog::getSaveFileName(this,
                                                        tr("Save Report As Comma Separated File"),
@@ -242,7 +266,7 @@ void ClassesInHTMLFilesWidget::Save()
     try {
         Utility::WriteUnicodeTextFile(data, destination);
     } catch (CannotOpenFile&) {
-        QMessageBox::warning(this, tr("Sigil"), tr("Cannot save report file."));
+        Utility::warning(this, tr("Sigil"), tr("Cannot save report file."));
     }
 
     m_LastDirSaved = QFileInfo(destination).absolutePath();

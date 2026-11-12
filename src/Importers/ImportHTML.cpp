@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford, Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford, Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -23,11 +23,11 @@
 #include <memory>
 #include <functional>
 
-#include <QtCore/QtCore>
-#include <QtCore/QDir>
-#include <QtCore/QFileInfo>
-#include <QtCore/QFutureSynchronizer>
-#include <QtConcurrent/QtConcurrent>
+#include <QtCore>
+#include <QDir>
+#include <QFileInfo>
+#include <QFutureSynchronizer>
+#include <QtConcurrent>
 #include <QDebug>
 
 #include "BookManipulation/CleanSource.h"
@@ -36,6 +36,7 @@
 #include "BookManipulation/XhtmlDoc.h"
 #include "Importers/ImportHTML.h"
 #include "Parsers/GumboInterface.h"
+#include "Parsers/OPFParser.h" // for MetaEntry
 #include "Misc/HTMLEncodingResolver.h"
 #include "Misc/SettingsStore.h"
 #include "Misc/TempFolder.h"
@@ -55,7 +56,8 @@ ImportHTML::ImportHTML(const QString &fullfilepath)
     :
     Importer(fullfilepath),
     m_IgnoreDuplicates(false),
-    m_CachedSource(QString())
+    m_CachedSource(QString()),
+    m_UpdateOPF(true)
 {
     SettingsStore ss;
     m_EpubVersion = ss.defaultVersion();
@@ -159,7 +161,7 @@ void ImportHTML::LoadMetadata(const QString & source)
     QList<GumboNode*> nodes = gi.get_all_nodes_with_tag(GUMBO_TAG_META); 
     for (int i = 0; i < nodes.count(); ++i) {
         GumboNode* node = nodes.at(i);
-        MetaEntry meta = HTMLMetadata::Instance()->MapHTMLToOPFMetadata(node, gi);
+        MetaEntry meta = HTMLMetadata::instance().MapHTMLToOPFMetadata(node, gi);
         if (!meta.m_name.isEmpty() && !meta.m_content.isEmpty()) {
             metadata.append(meta);
         }
@@ -173,7 +175,7 @@ HTMLResource *ImportHTML::CreateHTMLResource()
     TempFolder tempfolder;
     QString fullfilepath = tempfolder.GetPath() + "/" + QFileInfo(m_FullFilePath).fileName();
     Utility::WriteUnicodeTextFile("TEMP_SOURCE", fullfilepath);
-    HTMLResource *resource = qobject_cast<HTMLResource *>(m_Book->GetFolderKeeper()->AddContentFileToFolder(fullfilepath));
+    HTMLResource *resource = qobject_cast<HTMLResource *>(m_Book->GetFolderKeeper()->AddContentFileToFolder(fullfilepath, m_UpdateOPF));
     resource->SetCurrentBookRelPath(m_FullFilePath);
     m_AddedBookPaths << resource->GetRelativePath();
     return resource;
@@ -253,15 +255,15 @@ QHash<QString, QString> ImportHTML::LoadFolderStructure(const QString &source)
     QStringList mediapaths = XhtmlDoc::GetPathsToMediaFiles(source);
     QStringList stylepaths = XhtmlDoc::GetPathsToStyleFiles(source);
     QFutureSynchronizer<QHash<QString, QString>> sync;
-    sync.addFuture(QtConcurrent::run(this, &ImportHTML::LoadMediaFiles,  mediapaths));
-    sync.addFuture(QtConcurrent::run(this, &ImportHTML::LoadStyleFiles,  stylepaths));
+    sync.addFuture(QtConcurrent::run(&ImportHTML::LoadMediaFiles, this,  mediapaths));
+    sync.addFuture(QtConcurrent::run(&ImportHTML::LoadStyleFiles, this,  stylepaths));
     sync.waitForFinished();
     QList<QFuture<QHash<QString, QString>>> futures = sync.futures();
     int num_futures = futures.count();
     QHash<QString, QString> updates;
 
     for (int i = 0; i < num_futures; ++i) {
-        updates.unite(futures.at(i).result());
+        updates.insert(futures.at(i).result());
     }
 
     return updates;
@@ -288,7 +290,7 @@ QHash<QString, QString> ImportHTML::LoadMediaFiles(const QStringList & file_path
             if (m_IgnoreDuplicates && !existing_book_path.isEmpty()) {
                 newpath = newpath = existing_book_path;
             } else {
-                Resource * resource = m_Book->GetFolderKeeper()->AddContentFileToFolder(fullfilepath);
+                Resource * resource = m_Book->GetFolderKeeper()->AddContentFileToFolder(fullfilepath, m_UpdateOPF);
                 newpath = resource->GetRelativePath();
                 m_AddedBookPaths << newpath;
             }
@@ -323,7 +325,7 @@ QHash<QString, QString> ImportHTML::LoadStyleFiles(const QStringList & file_path
             if (m_IgnoreDuplicates && !existing_book_path.isEmpty()) {
                 newpath = existing_book_path;
             } else {
-                Resource * resource = m_Book->GetFolderKeeper()->AddContentFileToFolder(fullfilepath);
+                Resource * resource = m_Book->GetFolderKeeper()->AddContentFileToFolder(fullfilepath, m_UpdateOPF);
                 newpath = resource->GetRelativePath();
                 m_AddedBookPaths << newpath;
             }

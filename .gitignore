@@ -45,7 +45,6 @@ BuildLog.htm
 CMakeFiles
 CMakeScripts
 CMakeCache.txt
-*.cmake
 *.dir
 ALL_BUILD*
 
@@ -69,7 +68,6 @@ qrc_*
 *.pbxindex
 *.build
 *.smp
-*.pl
 *.pyc
 *.pyo
 *.orig
@@ -79,3 +77,10 @@ OpenCandy
 tags
 build
 
+# Appimage created archives
+*.tar.xz
+
+#AppImage builds
+squashfs-root/
+*.AppImage
+*.zsync

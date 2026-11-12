@@ -11,7 +11,7 @@ app_dir = os.path.dirname(os.path.realpath(__file__))
 app_dir = os.path.join(app_dir, 'Sigil.app','Contents','Frameworks')
 
 # actual version of Python used to build Sigil
-build_fwk = os.path.abspath(sys.prefix + '../../../')
+build_fwk = os.path.abspath(sys.prefix)
 
 # get python version string
 pversion = build_fwk.split(os.sep)[-1]
@@ -25,6 +25,7 @@ print('pversion', pversion)
 print('stdlib_dir', stdlib_dir)
 print('stdlib_name', stdlib_name)
 print('app_dir', app_dir)
+print('sys.prefix', os.path.abspath(sys.prefix))
 
 
 # the main Python.framework directories
@@ -33,9 +34,28 @@ fwk_struct = ['Python.framework/Versions/' + pversion + '/lib/' + stdlib_name + 
 ]
 
 # minimal set of PyQt modules to support the plugin gui
-PYQT_MODULES = ['%s.so' % x for x in ('Qt', 'QtCore', 'QtDBus', 'QtGui', 'QtNetwork', 'QtPrintSupport',
-                                      'QtSvg', 'QtWidgets', 'QtWebEngine', 'QtWebEngineCore',
-                                      'QtWebEngineWidgets', 'QtWebChannel','sip')]
+# try to handle newer and older versions of sip/pyqt5
+PYQT_MODULE_NAMES = ['Qt', 'QtCore', 'QtDBus', 'QtGui', 'QtNetwork', 'QtPdf', 'QtPrintSupport',
+                     'QtSvg', 'QtWidgets', 'QtWebEngine', 'QtWebEngineCore',
+                     'QtWebEngineWidgets', 'QtWebChannel']
+
+fwk_PyQt5_site_path = os.path.join(build_fwk, 'lib', stdlib_name, 'site-packages', 'PyQt5')
+fwk_bin_ver = str(sys.version_info[0]) + str(sys.version_info[1])
+
+using_new_sip = os.path.exists(os.path.join(fwk_PyQt5_site_path, 'QtCore.abi3.so'))
+PYQT_MODULES = []
+for name in PYQT_MODULE_NAMES:
+    if using_new_sip:
+        mname = name + ".abi3.so"
+    else:
+        mname = name + ".so"
+    PYQT_MODULES.append(mname)
+
+if using_new_sip:
+    sip_name = 'sip.cpython-' + fwk_bin_ver + '-darwin.so'
+else:
+    sip_name = 'sip.so'
+PYQT_MODULES.append(sip_name)
 
 EXCLUDED_UIC_WIDGET_PLUGINS = ['%s.py' % x for x in ('qaxcontainer', 
                                                      'qscintilla', 'qtcharts', 'qtquickwidgets', 'qtwebkit')
@@ -66,6 +86,18 @@ site_packages = [ ('lxml', 'd'),
 #  ('test_regex.py', 'f'),
 
 
+def copy_python_tcltk(src_dir, dest_dir):
+    for x in os.listdir(src_dir):
+        y = os.path.join(src_dir, x)
+        ext = os.path.splitext(x)[1]
+        if os.path.isdir(y) and x not in ('python' + pversion, 'tcl8', 'pkgconfig', 'demos', 'tzdata'):
+            shutil.copytree(y, os.path.join(dest_dir, x),
+                    ignore=ignore_in_tcltk_dirs)
+        if os.path.isfile(y) and ext not in ('.sh', '.chm', '.htm', '.txt'):
+            if x != 'libpython' + pversion + '.dylib': 
+                shutil.copy2(y, dest_dir)
+
+                
 def copy_python_stdlibrary(src_dir, dest_dir):
     for x in os.listdir(src_dir):
         y = os.path.join(src_dir, x)
@@ -103,6 +135,23 @@ def copy_site_packages(packages, site_dest):
             else:
                 break
 
+
+def ignore_in_tcltk_dirs(base, items, ignored_dirs=None):
+    ans = []
+    dylibname = 'libpython' + pversion + '.dylib'
+    if ignored_dirs is None:
+        ignored_dirs = {'tcl8', 'python' + pversion, 'pkgconfig', 'demos', 'tzdata'}
+    for name in items:
+        path = os.path.join(base, name)
+        if os.path.isdir(path):
+            if name in ignored_dirs:
+                ans.append(name)
+        else:
+            if name.rpartition('.')[-1] in ('chm', 'htm', 'html', 'txt' ):
+                ans.append(name)
+            if name == dylibname:
+                ans.append(name)
+    return ans
 
 def ignore_in_dirs(base, items, ignored_dirs=None):
     ans = []
@@ -176,6 +225,8 @@ def main():
     dest_dir = os.path.join(app_dir,'Python.framework','Versions', pversion, 'lib', stdlib_name, 'site-packages')
     copy_site_packages(site_packages, dest_dir)
 
+    dest_dir = os.path.join(app_dir,'Python.framework','Versions', pversion, 'lib')
+    
     # now pre-compile all of the .py code and replace it by .pyc
     dest_dir = os.path.join(app_dir,'Python.framework','Versions', pversion, 'lib', stdlib_name)
     for x in os.walk(dest_dir):
@@ -190,8 +241,14 @@ def main():
                     # if os.path.exists(z):
                     #     os.remove(z)
                 except:
+
                     print ('Failed to byte-compile', y)
 
+    # copy the embedded tcl/tk fpieces
+    tcltksrcdir = os.path.join(build_fwk, 'lib')
+    tcltkdestdir = os.path.join(app_dir,  'Python.framework', 'Versions', pversion, 'lib')
+    copy_python_tcltk(tcltksrcdir, tcltkdestdir)
+    
     # next copy the bin
     src_file = os.path.join(build_fwk, 'bin', 'python3')
     dest_file = os.path.join(app_dir,  'Python.framework', 'Versions', pversion, 'bin', 'python3')
@@ -218,7 +275,6 @@ def main():
     os.symlink(os.path.join('Versions', 'Current', 'Resources'), 'Resources')
 
     os.chdir(os.path.join(app_dir, 'Python.framework', 'Versions', pversion, 'lib'))
-    # dylibname = 'libpython' + pversion + 'm.dylib'
     dylibname = 'libpython' + pversion + '.dylib'
     os.symlink('../Python', dylibname)
 
@@ -232,13 +288,14 @@ def main():
 
     # Change any PyQt5 modules rpaths to point to the local Frameworks (app_dir) directory for Qt
     for module_name in PYQT_MODULES:
-        if module_name not in ['Qt.so']:
+        if module_name not in ['Qt.abi3.so', 'Qt.so']:
             module_path = os.path.abspath(os.path.join(app_dir,'Python.framework','Versions',
                              pversion,'lib',stdlib_name,'site-packages','PyQt5',module_name))
-            rpaths = get_rpaths(module_path)
-            for rpath in rpaths:
-                new_rpath = '@loader_path/../../../../../../..'
-                subprocess.check_call(['install_name_tool', '-rpath', rpath, new_rpath, module_path])
+            if os.path.exists(module_path):
+                rpaths = get_rpaths(module_path)
+                for rpath in rpaths:
+                    new_rpath = '@loader_path/../../../../../../..'
+                    subprocess.check_call(['install_name_tool', '-rpath', rpath, new_rpath, module_path])
 
 
 if __name__ == '__main__':

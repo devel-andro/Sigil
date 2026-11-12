@@ -1,6 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2016-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2016-2026 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2016-2022 Doug Massay
 **
 **  This file is part of Sigil.
 **
@@ -27,8 +28,9 @@
 #include <QStringList>
 #include <QVariant>
 #include <QMetaType>
-
 #include "EmbedPython/DiffRec.h"
+
+class PyObjectPtr;
 
 struct MetadataPieces {
     QString data;
@@ -63,6 +65,11 @@ public:
     QStringList GetRepoTagsInPython(    const QString& localRepo, 
                                         const QString& bookid );
 
+    bool ChangeRepoTagMsgInPython(      const QString& localRepo,
+                                        const QString& bookid, 
+                                        const QString& tagname, 
+                                        const QString& newmessage);
+
     QString GenerateEpubFromTagInPython(const QString& localRepo, 
                                         const QString& bookid,
                                         const QString& tagname,
@@ -90,7 +97,31 @@ public:
     QList<QStringList> GetCurrentStatusVsDestDirInPython(const QString& bookroot,
                                                          const QStringList& bookfiles,
                                                          const QString& destdir);
-    
+
+    QString RebaseManifestIDsInPython(const QString& opfdata);
+
+
+
+
+    PyObjectPtr SetupInitialFunctionSearchEnvInPython(const QString& function_name);
+
+    QString DoFunctionSearchTextReplacementsInPython(PyObjectPtr FSO,
+                                                     const QString& pattern,
+                                                     const QString& bookpath,
+                                                     const QString& text);
+
+    int GetCurrentReplacementCountInPython(PyObjectPtr FSO);
+
+    QString GetSingleReplacementByFunction(PyObjectPtr FSO,
+                                           const QString& bookpath,
+                                           const QString& text,
+                                           const QList<std::pair<int,int>>capture_groups);
+
+    bool CreateUserJsonFileInPython();
+
+    QString GetNameOfCurrentCodepointInPython(int cp);
+
+    bool ConvertPngToGifInPython(const QString& pngpath, const QString& gifpath);
 
 private:
 

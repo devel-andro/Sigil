@@ -1,7 +1,7 @@
 /************************************************************************
  **
- **  Copyright (C) 2014-2021 Kevin B. Hendricks, Stratford Ontario Canada
- **  Copyright (C) 2020      Doug Massay
+ **  Copyright (C) 2014-2026 Kevin B. Hendricks, Stratford Ontario Canada
+ **  Copyright (C) 2020-2025 Doug Massay
  **
  **  This file is part of Sigil.
  **
@@ -51,6 +51,7 @@
 //const QString IDPF_FONT_ALGO_ID          = "http://www.idpf.org/2008/embedding";
 
 const QString PluginRunner::SEP = QString(QChar(31));
+const QString PluginRunner::_RS = QString(QChar(30));
 const QStringList PluginRunner::CHANGESTAGS = QStringList() << "deleted" << "added" << "modified";
 
 
@@ -62,7 +63,8 @@ PluginRunner::PluginRunner(TabManager *tabMgr, QWidget *parent)
       m_pluginName(""),
       m_pluginOutput(""),
       m_algorithm(""),
-      m_result("failed"),
+      m_fontMangling(""),
+      m_result(""),
       m_xhtml_net_change(0),
       m_ready(false)
 
@@ -75,14 +77,16 @@ PluginRunner::PluginRunner(TabManager *tabMgr, QWidget *parent)
     // set default font obfuscation algorithm to use
     // ADOBE_FONT_ALGO_ID or IDPF_FONT_ALGO_ID ??
     QList<Resource *> fonts = m_book->GetFolderKeeper()->GetResourceListByType(Resource::FontResourceType);
+    QStringList font_extra_info;
     foreach (Resource * resource, fonts) {
         FontResource *font_resource = qobject_cast<FontResource *> (resource);
         QString algorithm = font_resource->GetObfuscationAlgorithm();
         if (!algorithm.isEmpty()) {
-            m_algorithm = algorithm;
-            break;
+            if (m_algorithm.isEmpty()) m_algorithm = algorithm;
+            font_extra_info << font_resource->GetRelativePath() + SEP + algorithm;
         }
     }
+    m_fontMangling = font_extra_info.join(_RS);
 
     // build hashes of href (book root relative path) to resources
     QList<Resource *> resources = m_book->GetFolderKeeper()->GetResourceList();
@@ -113,14 +117,13 @@ QStringList PluginRunner::SupportedEngines()
 int PluginRunner::exec(const QString &name)
 {
     QHash <QString, QStringList> plugininfo;
-    PluginDB *pdb = PluginDB::instance();
     Plugin *plugin;
     SettingsStore settings;
     QString launcher_root;
 
     m_ready = false;
 
-    plugin = pdb->get_plugin(name);
+    plugin = PluginDB::instance().get_plugin(name);
     if (plugin == NULL) {
         Utility::DisplayStdErrorDialog(tr("Error: A plugin by that name does not exist"));
         reject();
@@ -149,7 +152,7 @@ int PluginRunner::exec(const QString &name)
             engineList.append(m_engine);
         }
         foreach(QString engine, engineList) {
-            m_enginePath = pdb->get_engine_path(engine);
+            m_enginePath = PluginDB::instance().get_engine_path(engine);
             if (!m_enginePath.isEmpty()) break;
         } 
         if (m_enginePath.isEmpty()) {
@@ -243,19 +246,17 @@ void PluginRunner::writeSigilCFG()
     colors << pal.color(QPalette::Highlight).name();
     colors << pal.color(QPalette::HighlightedText).name();
     cfg << colors.join(",");
-    switch (settings.highDPI())
-    {
-        case 0:
-            cfg << "detect";
-            break;
-        case 1:
-            cfg << "on";
-            break;
-        case 2:
-            cfg << "off";
-            break;
-    }
+    // Leave removed highdpi setting as a dummy for now
+    cfg << "detect";
+    // handle automate and automate plugin parameter
     cfg << qApp->font().toString();
+    if (m_mainWindow->UsingAutomate()) {
+        cfg << "InAutomate";
+    } else {
+        cfg << "NoAutomate";
+    }
+    cfg << m_mainWindow->AutomatePluginParameter();
+    cfg << m_fontMangling;
     QList <Resource *> selected_resources = m_bookBrowser->AllSelectedResources();
     foreach(Resource * resource, selected_resources) {
         cfg << resource->GetRelativePath();
@@ -269,7 +270,7 @@ void PluginRunner::startPlugin()
     QStringList args;
     SettingsStore settings;
     if (!m_ready) {
-        Utility::DisplayStdErrorDialog(tr("Error: plugin can not start"));
+        Utility::DisplayStdErrorDialog(tr("Error: plugin cannot start"));
         return;
     }
     ui.textEdit->clear();
@@ -298,7 +299,7 @@ void PluginRunner::startPlugin()
 #elif defined(Q_OS_WIN32)
         args.append(QString("-Bu"));
 #elif !defined(Q_OS_WIN32) && !defined(Q_OS_MAC)
-        args.append(QString("-Ou"));
+        args.append(QString("-EBu"));
 #endif
     }
     else {
@@ -311,12 +312,12 @@ void PluginRunner::startPlugin()
     args.append(QDir::toNativeSeparators(m_pluginPath));
     QString executable = QDir::toNativeSeparators(m_enginePath);
 
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
 #ifdef Q_OS_MAC
     // On Mac OS X, it appears that QProcess does not inherit the callers process environment at all
     // which directly contradicts the Qt documentation.
     // So we simply read the system environment and set it for QProcess manually
     // so that python getpreferredencoding() and stdout/stderr/stdin encodings to get properly set
-    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     if (settings.useBundledInterp()) {
          // determine path to site-packages/certifi/cacert.pem to set SSL_CERT_FILE
          QDir exedir(QCoreApplication::applicationDirPath());
@@ -326,11 +327,8 @@ void PluginRunner::startPlugin()
          env.insert("QT_PLUGIN_PATH", QDir(QCoreApplication::applicationDirPath() + "/../PlugIns").absolutePath());
          env.insert("QT_QPA_PLATFORM_PLUGIN_PATH", QDir(QCoreApplication::applicationDirPath() + "/../PlugIns/platforms").absolutePath());
     }
-    m_process.setProcessEnvironment(env);
 #elif defined(Q_OS_WIN32)
     if (settings.useBundledInterp()) {
-        // Start with system environment.
-        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
         // Set Python env variables to control how the bundled interpreter finds it's various pieces
         // (and to isolate the bundled interpreter from any system Python).
         // Relative to the interpreter binary to make it easier to relocate the bundled Python.
@@ -353,73 +351,73 @@ void PluginRunner::startPlugin()
         // Replace Qt environment variable with our own (for bundled PyQt5)
         env.insert("QT_QPA_PLATFORM_PLUGIN_PATH", QDir::toNativeSeparators(QCoreApplication::applicationDirPath() + "/platforms"));
         env.insert("QT_PLUGIN_PATH", QDir::toNativeSeparators(QCoreApplication::applicationDirPath()));
+        // Bundled PySide6 fails to find QtWebEngine resource without this set.
+        env.insert("PYSIDE_DISABLE_INTERNAL_QT_CONF", "1");
         // Prepend Sigil program directory to PATH so the bundled interpreter
-        // can find the correct Qt libs (for PyQt5) and the Python dll.
+        // can find the correct Qt libs (for PyQt5/PySide6) and the Python dll.
         env.insert("PATH", QDir::toNativeSeparators(QCoreApplication::applicationDirPath() + PATH_LIST_DELIM + env.value("PATH")));
-        // Set bundled Python environment.
-        m_process.setProcessEnvironment(env);
     }
     //Whether bundled or external, set working dir to the directory of the interpreter being used.
     m_process.setWorkingDirectory(QDir::toNativeSeparators(QFileInfo(m_enginePath).absolutePath()));
 #elif !defined(Q_OS_WIN32) && !defined(Q_OS_MAC)
-    QString appdir = QCoreApplication::applicationDirPath();
-    if (settings.useBundledInterp()) {  // Linux bundled Python settings
-        // Start with system environment.
-        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-        // Set Python env variables to control how the bundled interpreter finds it's various pieces
-        // (and to isolate the bundled interpreter from any system Python).
-        // Relative to the interpreter binary to make it easier to relocate the bundled Python.
-        QString pythonhome = QDir::toNativeSeparators(appdir + "/python3");
-        env.insert("PYTHONHOME", pythonhome);
-        env.insert("PYTHONIOENCODING", "UTF-8");
-        // Remove all other Python environment variables to avoid potential system Python interference.
-        // (Linux relevant Python env vars from v3.4 thru v3.6 (no debug build vars))
-        QStringList vars_to_unset;
-        vars_to_unset << "PYTHONPATH" << "PYTHONOPTIMIZE" << "PYTHONDEBUG" << "PYTHONSTARTUP"
-                      << "PYTHONINSPECT" << "PYTHONUNBUFFERED" << "PYTHONVERBOSE" << "PYTHONCASEOK"
-                      << "PYTHONDONTWRITEBYTECODE" << "PYTHONHASHSEED" << "PYTHONNOUSERSITE" << "PYTHONUSERBASE"
-                      << "PYTHONWARNINGS" << "PYTHONFAULTHANDLER" << "PYTHONTRACEMALLOC" << "PYTHONASYNCIODEBUG"
-                      << "PYTHONMALLOC" << "PYTHONMALLOCSTATS";
-        foreach(QString envvar, vars_to_unset) {
-            env.remove(envvar);
-        }
-        // Qt5.7+ variable that may interfere in the future.
-        env.remove("QT_QPA_PLATFORMTHEME");
-        // Replace Qt environment variables with our own (for bundled PyQt5)
-        env.insert("QT_QPA_PLATFORM_PLUGIN_PATH", QDir::toNativeSeparators(appdir + "/platforms"));
-        env.insert("QT_PLUGIN_PATH", appdir);
-        // Prepend Sigil program directory to LD_LIBRARY_PATH so the bundled interpreter
-        // can find the included Qt libs (for PyQt5) and the Python dll.
+    QDir exedir(QCoreApplication::applicationDirPath());  //  usr/bin in AppImage
+    exedir.cdUp();  //  usr in AppImage
+    // The following variable will be meaningless outside of an AppImage build; so do not use it there
+    QString AppImageLibs = QDir::toNativeSeparators(exedir.absolutePath() + PYTHON_MAIN_PREFIX);  //  usr/lib in AppImage
+    if (settings.useBundledInterp()) {  // Bundled Python being launched from AppImage Sigil
+        QString pythonhome = exedir.absolutePath(); //  usr in AppImage
+        // Make sure certifi module has a root cert
+        QString cert_path = AppImageLibs + PYTHON_LIB_PATH + "/site-packages" + "/certifi/cacert.pem";
+        env.insert("SSL_CERT_FILE", cert_path);
+        // Make sure Sigil's libdir appears only once ... and first in LD_LIBRARY_PATH.
+        // Should not technically be necessary since this is how the AppImage is launched, but it can't hurt.
         QStringList ld = env.value("LD_LIBRARY_PATH", "").split(PATH_LIST_DELIM);
-        // Make sure Sigil's appdir appears only once ... and first.
-        ld.removeAll(appdir);
-        ld.prepend(appdir);
-        // Reset modified LD_LIBRARY_PATH
+        ld.removeAll(AppImageLibs);
+        ld.prepend(AppImageLibs);
+        // Rebuild modified LD_LIBRARY_PATH
         env.insert("LD_LIBRARY_PATH", ld.join(PATH_LIST_DELIM));
-        // Set bundled Linux Python interpreter environment.
-        m_process.setProcessEnvironment(env);
-        // If launched by another program (calibre), the new working directory could mess with how the
-        // bundled interpreter finds/loads PyQt5. So set it manually to the bundled interpreter's directory.
-        m_process.setWorkingDirectory(QDir::toNativeSeparators(QFileInfo(m_enginePath).absolutePath()));
+        // Set an env var so the plugin framework can determine it's being launched from an AppImage.
+        env.insert("SIGIL_APPIMAGE_BUILD", "1");
     }
-    else {  // Linux native Python settings
-        // Start with system environment.
-        QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-        // Remove Sigil's appdir from LD_LIBRARY_PATH if it exists in environment so system Python can run unimpeded.
-        QStringList ld = env.value("LD_LIBRARY_PATH", "").split(PATH_LIST_DELIM);
-        ld.removeAll(appdir);
-        // Reset modified LD_LIBRARY_PATH or unset if empty
-        if (!ld.count()==0) {
+    else {  // External Python interp being used
+        if (APPIMAGE_BUILD) {  // External Python launched from AppImage Sigil
+            // Remove the AppImage lib directory from LD_LIBRARY_PATH so
+            // the external python/modules don't try to use it first
+            QStringList ld = env.value("LD_LIBRARY_PATH", "").split(PATH_LIST_DELIM);
+            ld.removeAll(AppImageLibs);
+            // Rebuild modified LD_LIBRARY_PATH or remove if empty
+            if (ld.count() > 0) {
+                env.insert("LD_LIBRARY_PATH", ld.join(PATH_LIST_DELIM));
+            }
+            else {
+                env.remove("LD_LIBRARY_PATH");
+            }
+            // An external python interpreter launched from an AppImage still needs to use
+            // the libsigilgumbo and libhunspell that's bundled with the AppImage.
+            QStringList preload;
+            preload.append(QDir::toNativeSeparators(AppImageLibs + "/libsigilgumbo.so"));
+            preload.append(QDir::toNativeSeparators(AppImageLibs + "/libhunspell.so"));
+            env.insert("LD_PRELOAD", preload.join(PATH_LIST_DELIM));
+            // Set an env var so the plugin framework can determine it's being launched from an AppImage.
+            env.insert("SIGIL_APPIMAGE_BUILD", "1");
+        } else {  // A no-AppImage version of Sigil using the system Python
+            // Make sure Sigil's app dir appears only once ... and first.
+            QString appdir = QCoreApplication::applicationDirPath();
+            QStringList ld = env.value("LD_LIBRARY_PATH", "").split(PATH_LIST_DELIM);
+            ld.removeAll(appdir);
+            ld.prepend(appdir);
+            // Sigil's application directory will be looked to for libsigilgumbo
+            // Sigil will also check there first for libhunspell and then look to the system
+            // (which will be the case for most repo mantained versions of Sigil)
+            // Rebuild modified LD_LIBRARY_PATH
             env.insert("LD_LIBRARY_PATH", ld.join(PATH_LIST_DELIM));
         }
-        else {
-            env.remove("LD_LIBRARY_PATH");
-        }
-        // Set native Linux Python interpreter environment.
-        m_process.setProcessEnvironment(env);
     }
 #endif
 
+    // For plugins to handle mismatches between PyQt5 and PySide6
+    env.insert("SIGIL_QT_RUNTIME_VERSION", QString(qVersion()));
+    m_process.setProcessEnvironment(env);
     m_process.start(executable, args);
     ui.statusLbl->setText(tr("Status: running"));
 
@@ -435,10 +433,12 @@ void PluginRunner::processOutput()
     m_pluginOutput = m_pluginOutput + newbytedata;
 }
 
+
 void PluginRunner::pluginFinished(int exitcode, QProcess::ExitStatus exitstatus)
 {
     if (exitstatus == QProcess::CrashExit) {
         ui.textEdit->append(tr("Launcher process crashed"));
+        m_result = "crashed";
     }
     // launcher exiting properly does not mean target plugin succeeded or failed
     // we need to parse the response xml to find the true result of target plugin
@@ -449,6 +449,10 @@ void PluginRunner::pluginFinished(int exitcode, QProcess::ExitStatus exitstatus)
     ui.progressBar->setRange(0,100);
     ui.progressBar->setValue(100);
 
+    if (m_result == "crashed" ||
+        m_result == "failed" ||
+        m_result == "cancelled") return;
+                           
     ui.statusLbl->setText(tr("Status: finished"));
 
     if (!processResultXML()) {
@@ -470,7 +474,7 @@ void PluginRunner::pluginFinished(int exitcode, QProcess::ExitStatus exitstatus)
     // don't allow changes to proceed if they will remove the very last xhtml/html file
     if (m_xhtml_net_change < 0) {
         QList<Resource *> htmlresources = m_book->GetFolderKeeper()->GetResourceListByType(Resource::HTMLResourceType);
-        if (htmlresources.count() + m_xhtml_net_change < 0) {
+        if (htmlresources.count() + m_xhtml_net_change <= 0) {
             Utility::DisplayStdErrorDialog(tr("Error: Plugin Tried to Remove the Last XHTML file .. aborting changes"));
             ui.statusLbl->setText(tr("Status: No Changes Made"));
             m_result = "failed";
@@ -585,6 +589,8 @@ void PluginRunner::reject()
 void PluginRunner::cancelPlugin()
 {
     // qDebug() << "in cancelPlugin()";
+    m_result = "cancelled";
+
     if (m_process.state() == QProcess::Running) {
         m_process.terminate();
     }
@@ -603,7 +609,7 @@ void PluginRunner::cancelPlugin()
     ui.textEdit->append(tr("Plugin cancelled"));
     ui.statusLbl->setText(tr("Status: cancelled"));
     ui.cancelButton->setEnabled(false);
-    m_result = "failed";
+    m_result = "cancelled";
 }
 
 bool PluginRunner::processResultXML()
@@ -638,7 +644,7 @@ bool PluginRunner::processResultXML()
                 mime =  attr.value("media-type").toString();
                 info << href << id << mime;
                 QString fileinfo = info.join(SEP);
-                if (reader.name() == "deleted") {
+                if (reader.name().compare(QLatin1String("deleted")) == 0) {
                     m_filesToDelete.append(fileinfo);
                     if (mime == "application/xhtml+xml") {
                         // only count deleting xhtml files that are 
@@ -648,7 +654,7 @@ bool PluginRunner::processResultXML()
                             m_xhtmlFiles.remove(href);
                         }
                     }
-                } else if (reader.name() == "added") {
+                } else if (reader.name().compare(QLatin1String("added")) == 0) {
                     m_filesToAdd.append(fileinfo);
                     if (mime == "application/xhtml+xml") {
                         m_xhtml_net_change++;
@@ -722,7 +728,7 @@ bool PluginRunner::checkIsWellFormed()
                 xmlFilesToCheck.append(href);
             } else if (mime == "application/x-dtbncx+xml") {
                 xmlFilesToCheck.append(href);
-            } else if (mime == "application/oebs-page-map+xml") {
+            } else if (mime == "application/oebps-page-map+xml" || mime == "application/vnd.adobe-page-map+xml") {
                 xmlFilesToCheck.append(href);
             } else if (mime == "application/xhtml+xml") {
                 xhtmlFilesToCheck.append(href);
@@ -741,7 +747,7 @@ bool PluginRunner::checkIsWellFormed()
                 xmlFilesToCheck.append(href);
             } else if (mime == "application/x-dtbncx+xml") {
                 xmlFilesToCheck.append(href);
-            } else if (mime == "application/oebs-page-map+xml") {
+            } else if (mime == "application/oebps-page-map+xml" || mime == "application/vnd.adobe-page-map+xml") {
                 xmlFilesToCheck.append(href);
             } else if (mime == "application/xhtml+xml") {
                 xhtmlFilesToCheck.append(href);
@@ -769,10 +775,12 @@ bool PluginRunner::checkIsWellFormed()
             // auto repair any xml file changes to be safe
             QString filePath = m_outputDir + "/" + href;
             ui.statusLbl->setText(tr("Status: checking") + " " + href);
-            QString mtype = "application/oebs-page-map+xml";
+            QString mtype = "application/xml";
             if (href.endsWith(".opf")) mtype = "application/oebps-package+xml";
             if (href.endsWith(".ncx")) mtype = "application/x-dtbncx+xml";
-            if (href.endsWith(".smil")) mtype = "application/oebps-package+xml";
+            if (href.endsWith(".smil")) mtype = "application/smil+xml";
+            if (href.endsWith(".pls")) mtype = "application/pls+xml";
+            if (href.endsWith(".ttml")) mtype = "application/ttml+xml";
             QString data = Utility::ReadUnicodeTextFile(filePath);
             QString newdata = CleanSource::ProcessXML(data, mtype);
             Utility::WriteUnicodeTextFile(newdata, filePath);
@@ -876,18 +884,6 @@ bool PluginRunner::addFiles(const QStringList &files)
             QString epubPath = m_outputDir + "/" + href;
             QFileInfo fi(epubPath);
             ui.statusLbl->setText(tr("Status: Loading") + " " + fi.fileName());
-#if 0 // was ifdef Q_OS_MAC
-            // creating a new MainWindow inside a modal QDialog seems to have issues
-            // about mouse pointer location and focus that may cause a segfault in 
-            // showModal() -> isBlockingWindow() -> isAncestorOf() when a
-            // Preferences Dialog is invoked in that New Window before focus is outside
-            // of the Plugin Runner and in the new Window.  The segfault is due
-            // to stale pointers in qApplication::modalWindowList().
-            MainWindow *new_window = new MainWindow(epubPath, "", true);
-            new_window->show();
-            // will this be allowed if PluginRunner is Application Modal
-            new_window->activateWindow();
-#else
             // For Linux and Windows and macOS  will replace current book
             // So Throw Up a Dialog to See if they want to proceed
             bool proceed = false;
@@ -910,7 +906,6 @@ bool PluginRunner::addFiles(const QStringList &files)
             if (proceed) {
                 m_mainWindow->LoadFile(epubPath, true);
             }
-#endif
             return true;
         }
 
@@ -943,7 +938,7 @@ bool PluginRunner::addFiles(const QStringList &files)
 
         Resource *resource = m_book->GetFolderKeeper()->AddContentFileToFolder(inpath,false, mime, href);
 
-        // AudioResource, VideoResource, FontResource, ImageResource do not appear to be cached
+        // AudioResource, VideoResource, FontResource, ImageResource, PdfResource do not appear to be cached
         // For new Editable Resources must do the equivalent of the InitialLoad
         // Order is important as some resource types inherit from other resource types
 
@@ -1019,7 +1014,7 @@ bool PluginRunner::modifyFiles(const QStringList &files)
         Resource *resource = m_hrefToRes.value(href);
         if (resource) {
 
-            // AudioResource, VideoResource, FontResource, ImageResource do not appear to be editable
+            // AudioResource, VideoResource, FontResource, ImageResource, PdfResource do not appear to be editable
 
             // For Editable Resources must relaod them from modified file
             // Order below is important as some resouirce types inherit from other resource types
@@ -1070,7 +1065,7 @@ void PluginRunner::connectSignalsToSlots()
     connect(ui.cancelButton, SIGNAL(clicked()), this, SLOT(cancelPlugin()));
     connect(ui.showButton, SIGNAL(clicked()), this, SLOT(showConsole()));
     connect(&m_process, SIGNAL(finished(int, QProcess::ExitStatus)), this, SLOT(pluginFinished(int, QProcess::ExitStatus)));
-    connect(&m_process, SIGNAL(error(QProcess::ProcessError)), this, SLOT(processError(QProcess::ProcessError)));
+    connect(&m_process, SIGNAL(errorOccurred(QProcess::ProcessError)), this, SLOT(processError(QProcess::ProcessError)));
     connect(&m_process, SIGNAL(readyReadStandardError()), this, SLOT(processError()));
     connect(&m_process, SIGNAL(readyReadStandardOutput()), this, SLOT(processOutput()));
     connect(ui.okButton, SIGNAL(clicked()), this, SLOT(accept()));

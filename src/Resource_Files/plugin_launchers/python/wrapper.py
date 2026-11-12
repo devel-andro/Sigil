@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim:ts=4:sw=4:softtabstop=4:smarttab:expandtab
 
-# Copyright (c) 2014-2020 Kevin B. Hendricks and Doug Massay
+# Copyright (c) 2014-2026 Kevin B. Hendricks and Doug Massay
 # All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without modification,
@@ -35,6 +35,11 @@ from hrefutils import ext_mime_map, mime_group_map
 
 import unicodedata
 
+_launcher_version = 20261109
+
+_RS = chr(30) # record separator
+_US = chr(31) # unit separator
+
 def _utf8str(p):
     if p is None:
         return None
@@ -48,8 +53,6 @@ def _unicodestr(p):
     if isinstance(p, str):
         return p
     return p.decode('utf-8', errors='replace')
-
-_launcher_version = 20211025
 
 _PKG_VER = re.compile(r'''<\s*package[^>]*version\s*=\s*["']([^'"]*)['"][^>]*>''', re.IGNORECASE)
 
@@ -73,12 +76,13 @@ TEXT_MIMETYPES = [
     'text/css',
     'application/x-dtbncx+xml',
     'application/oebps-package+xml',
-    'application/oebs-page-map+xml',
+    'application/oebps-page-map+xml',
+    'application/vnd.adobe-page-map+xml',
     'application/smil+xml',
     'application/adobe-page-template+xml',
     'application/vnd.adobe-page-template+xml',
     'text/javascript',
-    'application/javascript'
+    'application/javascript',
     'application/pls+xml'
 ]
 
@@ -120,6 +124,9 @@ class Wrapper(object):
         self.epub_filepath = ""
         self.colormode = None
         self.colors = None
+        self.using_automate = False
+        self.automate_parameter = None
+        self.font_mangling = {}
         # File selected in Sigil's Book Browser
         self.selected = []
         cfg = ''
@@ -141,6 +148,15 @@ class Wrapper(object):
             self.colors = cfg_lst.pop(0)
             self.highdpi = cfg_lst.pop(0)
             self.uifont = cfg_lst.pop(0)
+            self.using_automate = (cfg_lst.pop(0) == "InAutomate")
+            self.automate_parameter = cfg_lst.pop(0);
+            mangle_list = []
+            font_info = cfg_lst.pop(0)
+            if font_info and font_info != "":
+                mangle_list = font_info.split(_RS);
+            for finfo in mangle_list:
+                fontpath, algo = finfo.split(_US);
+                self.font_mangling[fontpath] = algo
             self.selected = cfg_lst
         os.environ['SigilGumboLibPath'] = self.get_gumbo_path()
 
@@ -419,7 +435,7 @@ class Wrapper(object):
     def getpagemapid(self):
         for id in self.id_to_mime:
             mime = self.id_to_mime[id]
-            if mime == "application/oebs-page-map+xml":
+            if mime in ("application/oebps-page-map+xml", "application/vnd.adobe-page-map+xml"):
                 return id
         return None
 
@@ -808,6 +824,12 @@ class Wrapper(object):
         href = urldecodepart(href)
         return self.href_to_id.get(href, ow)
 
+    # new in Sigil 2.2.0
+    def map_font_bookpath_to_mangling_algorithm(self, bookpath, ow):
+        if bookpath in self.font_mangling:
+            return self.font_mangling[bookpath]
+        return ow
+
     # new in Sigil 1.0
     def map_bookpath_to_id(self, bookpath, ow):
         bookpath = _unicodestr(bookpath)
@@ -1023,6 +1045,9 @@ class Wrapper(object):
             lib_name = 'sigilgumbo.dll'
         else:
             lib_dir = os.path.abspath(self.appdir)
+            # The Linux AppImage structure is different than the normal bundle
+            if 'SIGIL_APPIMAGE_BUILD' in os.environ:
+                lib_dir = os.path.abspath(os.path.join(self.appdir, "..", "lib"))
             lib_name = 'libsigilgumbo.so'
         return os.path.join(lib_dir, lib_name)
 
@@ -1035,5 +1060,8 @@ class Wrapper(object):
             lib_name = 'hunspell.dll'
         else:
             lib_dir = os.path.abspath(self.appdir)
+            # The Linux AppImage structure is different than the normal bundle
+            if 'SIGIL_APPIMAGE_BUILD' in os.environ:
+                lib_dir = os.path.abspath(os.path.join(self.appdir, "..", "lib"))
             lib_name = 'libhunspell.so'
         return os.path.join(lib_dir, lib_name)

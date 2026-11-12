@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2020 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2012      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012      Dave Heiland
 **  Copyright (C) 2012      Grant Drake
@@ -25,15 +25,15 @@
 #include <QtCore/QFile>
 #include <QtCore/QSignalMapper>
 #include <QtWidgets/QAbstractItemView>
-#include <QtWidgets/QAction>
+#include <QAction>
 #include <QtWidgets/QCompleter>
 #include <QtGui/QContextMenuEvent>
 #include <QtWidgets/QMenu>
 #include <QPointer>
 
 #include "Misc/Utility.h"
-#include "Misc/FindReplaceQLineEdit.h"
 #include "MiscEditors/SearchEditorModel.h"
+#include "Misc/FindReplaceQLineEdit.h"
 
 FindReplaceQLineEdit::FindReplaceQLineEdit(QWidget *parent)
     : QLineEdit(parent),
@@ -41,7 +41,7 @@ FindReplaceQLineEdit::FindReplaceQLineEdit(QWidget *parent)
       m_searchMapper(new QSignalMapper(this)),
       m_tokeniseEnabled(true)
 {
-    connect(m_searchMapper, SIGNAL(mapped(const QString &)), m_FindReplace, SLOT(LoadSearchByName(const QString &)));
+    connect(m_searchMapper, SIGNAL(mappedString(const QString &)), m_FindReplace, SLOT(LoadSearchByName(const QString &)));
 }
 
 FindReplaceQLineEdit::~FindReplaceQLineEdit()
@@ -69,6 +69,18 @@ void FindReplaceQLineEdit::contextMenuEvent(QContextMenuEvent *event)
 
     topAction = clearHistoryAction;
 
+    QAction *functionReplaceAction = new QAction(tr("Python Function Replace") + "...", menu);
+    connect(functionReplaceAction, SIGNAL(triggered()), m_FindReplace, SLOT(DoPythonFunction()));
+
+    if (topAction) {
+        menu->insertAction(topAction, functionReplaceAction);
+        menu->insertSeparator(topAction);
+    } else {
+        menu->addAction(functionReplaceAction);
+    }
+
+    topAction = clearHistoryAction;
+    
     if (m_tokeniseEnabled) {
         QAction *tokeniseAction = new QAction(tr("Tokenise Selection"), menu);
         connect(tokeniseAction, SIGNAL(triggered()), m_FindReplace, SLOT(TokeniseSelection()));
@@ -89,7 +101,7 @@ void FindReplaceQLineEdit::contextMenuEvent(QContextMenuEvent *event)
     menu->insertSeparator(topAction);
     topAction = saveSearchAction;
 
-    if (CreateMenuEntries(menu, topAction, SearchEditorModel::instance()->invisibleRootItem())) {
+    if (CreateMenuEntries(menu, topAction, SearchEditorModel::instance().invisibleRootItem())) {
         menu->insertSeparator(topAction);
     }
 
@@ -113,7 +125,7 @@ bool FindReplaceQLineEdit::CreateMenuEntries(QMenu *parent_menu, QAction *topAct
         if (!item->data().toBool()) {
             searchAction = new QAction(item->text(), this);
             connect(searchAction, SIGNAL(triggered()), m_searchMapper, SLOT(map()));
-            m_searchMapper->setMapping(searchAction, SearchEditorModel::instance()->GetFullName(item));
+            m_searchMapper->setMapping(searchAction, SearchEditorModel::instance().GetFullName(item));
 
             if (!topAction) {
                 parent_menu->addAction(searchAction);

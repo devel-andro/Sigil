@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2016-2021 Kevin B. Hendricks, Stratford, ON, Canada
+**  Copyright (C) 2016-2026 Kevin B. Hendricks, Stratford, ON, Canada
 **  Copyright (C) 2011      John Schember <john@nachtimwald.com>
 **
 **  This file is part of Sigil.
@@ -23,18 +23,10 @@
 #include <QtCore/QString>
 #include <QtCore/QStringList>
 
+#include "Misc/Utility.h"
+#include "Misc/UILanguage.h"
 #include "Misc/Language.h"
 
-Language *Language::m_instance = 0;
-
-Language *Language::instance()
-{
-    if (m_instance == 0) {
-        m_instance = new Language();
-    }
-
-    return m_instance;
-}
 
 QString Language::GetLanguageName(QString code, QString ow)
 {
@@ -73,6 +65,24 @@ void Language::SetLanguageMap()
 {
     if (!m_languageCodeMap.isEmpty()) {
         return;
+    }
+
+    QStringList used_codes;
+    QString codes = Utility::GetEnvironmentVar("SIGIL_ONLY_USE_LANGCODES");
+    if (!codes.isEmpty()) {
+        foreach(QString acode, codes.split(",")) {
+            if (!acode.isEmpty() && !acode.trimmed().isEmpty()) {
+                used_codes << acode.trimmed();
+            }
+        }
+        if (!used_codes.isEmpty()) {
+            foreach(QString uicode, UILanguage::GetUILanguages()) {
+                uicode = uicode.replace("_","-");
+                if (!used_codes.contains(uicode)) {
+                    used_codes << uicode;
+                }
+            }
+        }
     }
 
     // Must be a 1 to 1 relationship between codes and names.
@@ -454,6 +464,7 @@ void Language::SetLanguageMap()
          "goh"   << tr("German- Old High (ca.750-1050)") <<
          "gem"   << tr("Germanic languages") <<
          "gil"   << tr("Gilbertese") <<
+         "glk"   << tr("Gilaki") << 
          "gon"   << tr("Gondi") <<
          "gor"   << tr("Gorontalo") <<
          "got"   << tr("Gothic") <<
@@ -533,6 +544,7 @@ void Language::SetLanguageMap()
          "mwr"   << tr("Marwari") <<
          "mas"   << tr("Masai") <<
          "myn"   << tr("Mayan languages") <<
+         "mzn"   << tr("Mazandarani") <<
          "men"   << tr("Mende") <<
          "mic"   << tr("Mi'kmaq, Micmac") <<
          "min"   << tr("Minangkabau") <<
@@ -658,11 +670,22 @@ void Language::SetLanguageMap()
     for (int i = 0; i < data.count(); i++) {
         QString code = data.at(i++);
         QString name = data.at(i);
-        m_languageCodeMap.insert(code, name);
-        m_languageNameMap.insert(name, code);
-        DescriptiveInfo minfo;
-        minfo.name = name;
-        minfo.description = QString();
-        m_LangInfo.insert(code, minfo);
+        if (!used_codes.isEmpty()) {
+            if (used_codes.contains(code)) {
+                m_languageCodeMap.insert(code, name);
+                m_languageNameMap.insert(name, code);
+                DescriptiveInfo minfo;
+                minfo.name = name;
+                minfo.description = QString();
+                m_LangInfo.insert(code, minfo);
+            }
+        } else {
+            m_languageCodeMap.insert(code, name);
+            m_languageNameMap.insert(name, code);
+            DescriptiveInfo minfo;
+            minfo.name = name;
+            minfo.description = QString();
+            m_LangInfo.insert(code, minfo);
+        }
     }
 }

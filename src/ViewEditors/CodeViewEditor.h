@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks Stratford, ON Canada 
-**  Copyright (C) 2009-2011  Strahinja Markovic  <strahinja.markovic@gmail.com>
+**  Copyright (C) 2015-2026 Kevin B. Hendricks Stratford, ON Canada 
+**  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
 **
@@ -25,7 +25,6 @@
 #define CODEVIEWEDITOR_H
 
 #include <QtCore/QList>
-#include <QtCore/QStack>
 #include <QtWidgets/QPlainTextEdit>
 #include <QtGui/QStandardItem>
 #include <QtCore/QUrl>
@@ -68,7 +67,8 @@ public:
     enum HighlighterType {
         Highlight_NONE,  /**< No source code highlighting */
         Highlight_XHTML, /**< XHTML source code highlighting */
-        Highlight_CSS    /**< CSS source code highlighting */
+        Highlight_CSS,   /**< CSS source code highlighting */
+        Highlight_JSON   /**< JSON source code highlighting */
     };
 
     /**
@@ -97,6 +97,8 @@ public:
     void HighlightMarkedText();
 
     bool MoveToMarkedText(Searchable::Direction direction, bool wrap);
+
+    bool MoveToSplitText(Searchable::Direction direction, int start, int end);
 
     /**
      * Routines to handle cutting code tags from selected text
@@ -132,9 +134,13 @@ public:
 
     bool IsInsertFileAllowed();
 
+    QString GetCurrentSingleOrOpenTagName();
+    
     bool InsertId(const QString &attribute_value);
+    bool InsertRole(const QString &attribute_value);
     bool InsertHyperlink(const QString &attribute_value);
     bool IsInsertIdAllowed();
+    bool IsInsertRoleAllowed();
     bool IsInsertHyperlinkAllowed();
     bool InsertTagAttribute(const QString &element_name, const QString &attribute_name, 
                             const QString &attribute_value, const QStringList &tag_list, 
@@ -224,13 +230,18 @@ public:
     // ala Kovid's solution in calibre PlainTextEdit
     virtual QMimeData *createMimeDataFromSelection() const;
 
+    // override the insertFromMimeData() to 
+    // attempt to normalize any text to form NFC before paste
+    virtual void insertFromMimeData(const QMimeData* source);
+
     // inherited
     bool IsLoadingFinished();
 
     int GetCursorPosition() const;
     int GetCursorLine() const;
     int GetCursorColumn() const;
-
+    int GetCursorCodepoint() const;
+  
     void SetZoomFactor(float factor);
 
     float GetZoomFactor() const;
@@ -250,7 +261,8 @@ public:
                   bool misspelled_words = false,
                   bool ignore_selection_offset = false,
                   bool wrap = true,
-                  bool selected_text = false);
+                  bool selected_text = false,
+                  int split_at = -1);
 
     int Count(const QString &search_regex, Searchable::Direction direction, bool wrap, bool selected_text = false);
 
@@ -376,6 +388,9 @@ public:
     bool ReformatCSSEnabled();
     void SetReformatCSSEnabled(bool value);
 
+    void SetContentMediaType(const QString& mt) { m_mediatype = mt; };
+    void SetContentBookPath(const QString& bp) { m_bookpath = bp; };
+
     /**
      * Control wheter the Reformat (clean) HTML submenu is avaliable on the context menu.
      */
@@ -383,6 +398,7 @@ public:
     void SetReformatHTMLEnabled(bool value);
 
     bool PasteClipNumber(int clip_number);
+    bool PasteClipText(const QString& cliptext);
 
     void HighlightWord(const QString &word, int pos);
 
@@ -443,7 +459,10 @@ public slots:
      *
      * @param printer The printer interface to use for printing.
      */
-    void print(QPagedPaintDevice *printer);
+    void print(QPrinter *printer);
+
+    void RenameClassClicked();
+    void RenameClass();
 
     // Implementations for PasteTarget.h
     void PasteText(const QString &text);
@@ -459,10 +478,14 @@ public slots:
 
     bool ClearMarkedText();
 
+    void SetAppearanceColors();
+
     void RehighlightDocument();
 
 protected:
 
+    QString cursor_selected_text(const QTextCursor& c) const;
+    
     /**
      * The global event processing function.
      *
@@ -569,6 +592,8 @@ private slots:
 
     void GoToLinkOrStyleAction();
 
+    void ToggleLineWrapMode();
+
     void ReformatCSSMultiLineAction();
     void ReformatCSSSingleLineAction();
 
@@ -602,8 +627,6 @@ private:
      */
     void UpdateLineNumberAreaFont(const QFont &font);
 
-    void SetAppearanceColors();
-
     /**
      * Executes a centerCursor() call if requested
      * with m_DelayedCursorScreenCenteringRequired.
@@ -636,9 +659,13 @@ private:
 
     void AddReformatCSSContextMenu(QMenu *menu);
 
+    void AddCSSClassContextMenu(QMenu *menu);
+
     void AddReformatHTMLContextMenu(QMenu *menu);
 
     void AddGoToLinkOrStyleContextMenu(QMenu *menu);
+
+    void AddToggleLineWrapModeContextMenu(QMenu *menu);
 
     void AddClipContextMenu(QMenu *menu);
 
@@ -652,45 +679,9 @@ private:
 
     bool InViewableImage();
 
-    /**
-     * An element on the stack when searching for
-     * the current caret location.
-     */
-    struct StackElement {
-        /**
-         * The tag name.
-         */
-        QString name;
+    // Used to convert between Hierarchy and QWedPath used by Preview, Gumbo, and TagLister
+    QList<ElementIndex> ConvertQWebPathToHierarchy(const QString& qwebpath) const;
 
-        /**
-         * The number of child elements
-         * detected for the element, so far.
-         */
-        int num_children;
-    };
-
-    /**
-     * Returns a stack of elements representing the
-     * current location of the caret in the document.
-     *
-     * @param offset The number of characters from document start to the end of
-     *               the start tag of the element the caret is residing in.
-     * @return The element location stack.
-     */
-    QStack<StackElement> GetCaretLocationStack(int offset) const;
-
-    /**
-     * Takes the stack provided by GetCaretLocationStack()
-     * and converts it into the element location hierarchy
-     * used by other ViewEditors.
-     *
-     * @param stack The StackElement stack.
-     * @return The converted ElementIndex hierarchy.
-     */
-    QList<ElementIndex> ConvertStackToHierarchy(const QStack<StackElement> stack) const;
-
-
-    // Used to convert Hierarchy to QWedPath used by BV and Gumbo
     QString ConvertHierarchyToQWebPath(const QList<ElementIndex>& hierarchy) const;
 
     /**
@@ -880,7 +871,9 @@ private:
 
     TagLister m_TagList;
     bool m_regen_taglist;
+
+    QString m_mediatype;
+    QString m_bookpath;
 };
 
 #endif // CODEVIEWEDITOR_H
-

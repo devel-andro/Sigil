@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2020 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2019-2021 Kevin B. Hendricks, Stratford Ontario Canada
 **
 **  This file is part of Sigil.
 **
@@ -25,14 +25,18 @@
 
 #include <QObject>
 #include <QUrl>
-#include <QtWebEngineWidgets/QWebEnginePage>
+#include <QtWebEngineWidgets>
+#include <QtWebEngineCore>
+#include <QWebEnginePage>
+
+class QWebEngineProfile;
 
 class SimplePage : public QWebEnginePage
 {
     Q_OBJECT
 
 public:
-    SimplePage(QObject *parent = 0);
+    SimplePage(QWebEngineProfile* profile=nullptr, QObject *parent = 0);
 
 };
 

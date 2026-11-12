@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford, Ontario, Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford, Ontario, Canada
 **  Copyright (C) 2012      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012      Dave Heiland
 **
@@ -23,13 +23,16 @@
 
 #include <QtCore/QCoreApplication>
 #include <QByteArray>
+#include <QFile>
 #include <QDataStream>
 #include <QtCore/QTime>
 
-#include "MiscEditors/IndexEditorModel.h"
+#include "sigil_constants.h"
 #include "Misc/Utility.h"
+#include "MiscEditors/IndexEditorModel.h"
 
-static const QString SETTINGS_FILE          = "sigil_index.ini";
+static const QString SETTINGS_FILE = INDEX_V6_SETTINGS_FILE;
+
 static const QString SETTINGS_GROUP         = "index_entries";
 static const QString ENTRY_PATTERN          = "Text to Include";
 static const QString ENTRY_INDEX_ENTRY      = "Index Entries";
@@ -38,18 +41,6 @@ const int COLUMNS = 2;
 
 static const int IS_GROUP_ROLE = Qt::UserRole + 1;
 static const int FULLNAME_ROLE = Qt::UserRole + 2;
-
-
-IndexEditorModel *IndexEditorModel::m_instance = 0;
-
-IndexEditorModel *IndexEditorModel::instance()
-{
-    if (m_instance == 0) {
-        m_instance = new IndexEditorModel();
-    }
-
-    return m_instance;
-}
 
 IndexEditorModel::IndexEditorModel(QObject *parent)
     : QStandardItemModel(parent),
@@ -81,11 +72,6 @@ IndexEditorModel::~IndexEditorModel()
 {
     delete m_FSWatcher;
     m_FSWatcher = 0;
-
-    if (m_instance) {
-        delete m_instance;
-        m_instance = 0;
-    }
 }
 
 void IndexEditorModel::SetDataModified(bool modified)
@@ -162,7 +148,7 @@ void IndexEditorModel::SettingsFileChanged(const QString &path) const
             m_FSWatcher->addPath(path);
         }
 
-        instance()->LoadInitialData();
+        instance().LoadInitialData();
         emit SettingsFileUpdated();
     }
 }

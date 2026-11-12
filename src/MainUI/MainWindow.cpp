@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
-**  Copyright (C) 2015-2021 Doug Massay
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Doug Massay
 **  Copyright (C) 2012-2015 John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012-2013 Dave Heiland
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
@@ -23,27 +23,24 @@
 **
 *************************************************************************/
 
-#include <QtCore/QFileInfo>
-#include <QtCore/QThread>
-#include <QtCore/QTimer>
+#include <QFileInfo>
+#include <QThread>
+#include <QTimer>
 #include <QtConcurrent>
 #include <QFuture>
-#include <QtGui/QDesktopServices>
-#include <QtGui/QImage>
-#include <QDesktopWidget>
+#include <QDesktopServices>
+#include <QImage>
 #include <QGuiApplication>
 #include <QScreen>
-#include <QtWidgets/QFileDialog>
-#include <QtWidgets/QInputDialog>
-#include <QtWidgets/QMessageBox>
-#include <QtWidgets/QProgressDialog>
-#include <QtWidgets/QToolBar>
-#include <QtWebEngineWidgets/QWebEngineSettings>
+#include <QFileDialog>
+#include <QInputDialog>
+#include <QMessageBox>
+#include <QProgressDialog>
+#include <QToolBar>
+#include <QtWebEngineWidgets>
+#include <QtWebEngineCore>
 #include <QRegularExpression>
 #include <QRegularExpressionMatch>
-#ifdef Q_OS_WIN32
-#include <QtWinExtras>
-#endif
 #include <QString>
 #include <QStringList>
 #include <QFont>
@@ -52,12 +49,15 @@
 #include <QWindowStateChangeEvent>
 #include <QStyleFactory>
 #include <QStyle>
+#include <QDirIterator>
 #include <QDebug>
 
 #include "BookManipulation/CleanSource.h"
 #include "BookManipulation/Index.h"
 #include "BookManipulation/FolderKeeper.h"
 #include "Dialogs/About.h"
+#include "Dialogs/AddClips.h"
+#include "Dialogs/AddRoles.h"
 #include "Dialogs/ClipEditor.h"
 #include "Dialogs/ClipboardHistorySelector.h"
 #include "Dialogs/DeleteStyles.h"
@@ -67,7 +67,7 @@
 #include "Dialogs/LinkStylesheets.h"
 #include "Dialogs/LinkJavascripts.h"
 #include "Dialogs/ManageRepos.h"
-#include "Dialogs/AutomateEditor.h"
+#include "Dialogs/ManageAutomation.h"
 #include "Dialogs/MetaEditor.h"
 #include "Dialogs/PluginRunner.h"
 #include "Dialogs/Preferences.h"
@@ -96,10 +96,12 @@
 #include "Misc/HTMLSpellCheckML.h"
 #include "Misc/KeyboardShortcutManager.h"
 #include "Misc/Landmarks.h"
+#include "Misc/AriaRoles.h"
 #include "Misc/MediaTypes.h"
 #include "Misc/OpenExternally.h"
 #include "Misc/Plugin.h"
 #include "Misc/PluginDB.h"
+#include "Misc/CodepointNames.h"
 #include "EmbedPython/PythonRoutines.h"
 #include "Misc/SettingsStore.h"
 #include "Misc/SleepFunctions.h"
@@ -122,8 +124,13 @@
 #include "Tabs/FlowTab.h"
 #include "Tabs/CSSTab.h"
 #include "Tabs/OPFTab.h"
+#include "Tabs/TextTab.h"
 #include "Tabs/TabManager.h"
 #include "MainUI/MainApplication.h"
+#include "Widgets/FileDropZone.h"
+#ifdef Q_OS_MAC  // allow MacOS to build its own recent files menu in dock
+extern void addFileToRecentDocs(const QString &filePath);
+#endif
 
 #define DWINGEO if(0)
 #define DBG if(0)
@@ -151,10 +158,6 @@ static const QString TABLE_OF_CONTENTS_NAME       = "tableofcontents";
 static const QString PREVIEW_WINDOW_NAME          = "previewwindow";
 static const QString CLIPS_WINDOW_NAME            = "clipswindow";
 static const QString FRAME_NAME                   = "managerframe";
-static const QString TAB_STYLE_SHEET              = "#managerframe {border-top: 0px solid white;"
-        "border-left: 1px solid grey;"
-        "border-right: 1px solid grey;"
-        "border-bottom: 1px solid grey;} ";
 static const QString HTML_TOC_FILE = "TOC.xhtml";
 static const QString HTML_INDEX_FILE = "Index.xhtml";
 const QString HTML_COVER_FILENAME = "cover.xhtml";
@@ -167,12 +170,15 @@ static const QStringList SUPPORTED_SAVE_TYPE = QStringList() << "epub";
 
 static const QString DEFAULT_FILENAME = "untitled.epub";
 static const QString CUSTOM_PREVIEW_STYLE_FILENAME = "custom_preview_style.css";
+static const QString CUSTOM_PREVIEW_STYLE_ALT_FILENAME = "custom_preview_style_alt.css";
 
 QStringList MainWindow::s_RecentFiles = QStringList();
 
 // This list needs to be kept in exact sync with AutomateEditor.cpp in Dialogs
 static const QStringList AUTOMATE_TOOLS = QStringList() <<
     "AddCover" <<
+    "AddNavToSpine" <<
+    "AddNavToSpineNonLinear" <<
     "CreateHTMLTOC" <<
     "DeleteUnusedMedia" <<
     "DeleteUnusedStyles" <<
@@ -180,8 +186,11 @@ static const QStringList AUTOMATE_TOOLS = QStringList() <<
     "GenerateTOC" <<
     "MendPrettifyHTML" <<
     "MendHTML" <<
+    "OnFailedRunSavedSearchReplaceAll" <<
+    "OnSuccessRunSavedSearchReplaceAll" <<
     "ReformatCSSMultipleLines" <<
     "ReformatCSSSingleLines" <<
+    "RemoveNavFromSpine" <<
     "RemoveNCXGuideFromEpub3" <<
     "RepoCommit" <<
     "RunSavedSearchReplaceAll" <<
@@ -190,8 +199,10 @@ static const QStringList AUTOMATE_TOOLS = QStringList() <<
     "SetBookBrowserToAllHTML" <<
     "SetBookBrowserToAllImages" <<
     "SetBookBrowserToInitialSelection" <<
+    "SetPluginParameter" <<
     "SplitOnSGFSectionMarkers" <<
     "StandardizeEpub" <<
+    "UseStandardFileExtensions" <<
     "UpdateManifestProperties" <<
     "ValidateStylesheetsWithW3C" <<
     "WellFormedCheckEpub";
@@ -205,6 +216,7 @@ MainWindow::MainWindow(const QString &openfilepath,
     QMainWindow(parent, flags),
     m_LastOpenFileWarnings(QStringList()),
     m_IsInitialLoad(true),
+    m_LastState(QByteArray()),
     m_CurrentFilePath(QString()),
     m_CurrentFileName(QString()),
     m_Book(new Book()),
@@ -236,11 +248,7 @@ MainWindow::MainWindow(const QString &openfilepath,
     m_ClipboardHistoryLimit(CLIPBOARD_HISTORY_MAX),
     m_LastPasteTarget(NULL),
     m_ZoomPreview(false),
-    m_LastWindowSize(QByteArray()),
-    m_LastState(QByteArray()),
     m_FirstTime(true),
-    m_PendingLastSizeUpdate(false),
-    m_SaveLastEnabled(false),
     m_PreviousHTMLResource(NULL),
     m_PreviousHTMLText(QString()),
     m_PreviousHTMLLocation(QList<ElementIndex>()),
@@ -249,12 +257,12 @@ MainWindow::MainWindow(const QString &openfilepath,
     m_menuPluginsEdit(NULL),
     m_menuPluginsValidation(NULL),
     m_pluginList(QStringList()),
-    m_SaveCSS(false),
+    m_SaveTab(false),
     m_IsClosing(false),
     m_headingActionGroup(new QActionGroup(this)),
-    m_UsingAutomate(false)
+    m_UsingAutomate(false),
+    m_automateLists(QStringList())
 {
-    createJumpList();
     ui.setupUi(this);
     // Telling Qt to delete this window
     // from memory when it is closed
@@ -272,6 +280,7 @@ MainWindow::MainWindow(const QString &openfilepath,
     ChangeSignalsWhenTabChanges(NULL, m_TabManager->GetCurrentContentTab());
     LoadInitialFile(openfilepath, version, is_internal);
     loadPluginsMenu();
+    UpdateAutomationMenu();
 }
 
 MainWindow::~MainWindow()
@@ -309,62 +318,13 @@ MainWindow::~MainWindow()
     if (m_TabManager) delete m_TabManager;
     if (m_PreviewWindow) delete m_PreviewWindow;
 #endif
-
 }
 
-
-void MainWindow::createJumpList()
+void MainWindow::runAutomate(QAction *action)
 {
-#ifdef Q_OS_WIN32
-    QWinJumpList jumplist;
-    jumplist.recent()->setVisible(true);
-#endif
-}
-
-void MainWindow::RunAutomate1()
-{
-    QString automatefile = Utility::DefinePrefsDir() + "/automate01.txt";
+    QString lname = action->text();
+    QString automatefile = Utility::DefinePrefsDir() + "/automate" + lname + ".txt";
     RunAutomate(automatefile);
-}
-
-void MainWindow::EditAutomate1()
-{
-    QString automatefile = Utility::DefinePrefsDir() + "/automate01.txt";
-    EditAutomate(automatefile);
-}
-
-void MainWindow::RunAutomate2()
-{
-    QString automatefile = Utility::DefinePrefsDir() + "/automate02.txt";
-    RunAutomate(automatefile);
-}
-
-void MainWindow::EditAutomate2()
-{
-    QString automatefile = Utility::DefinePrefsDir() + "/automate02.txt";
-    EditAutomate(automatefile);
-}
-
-void MainWindow::RunAutomate3()
-{
-    QString automatefile = Utility::DefinePrefsDir() + "/automate03.txt";
-    RunAutomate(automatefile);
-}
-
-void MainWindow::EditAutomate3()
-{
-    QString automatefile = Utility::DefinePrefsDir() + "/automate03.txt";
-    EditAutomate(automatefile);
-}
-
-void MainWindow::EditAutomate(const QString &automatefile)
-{
-    AutomateEditor aedit(automatefile, this);
-    if (aedit.exec() != QDialog::Accepted) {
-        ShowMessageOnStatusBar(tr("Automate List Editor cancelled."));
-        return;
-    }
-    ShowMessageOnStatusBar(tr("Automate List edited."));
 }
 
 void MainWindow::RunAutomate(const QString &automatefile)
@@ -390,17 +350,24 @@ void MainWindow::RunAutomate(const QString &automatefile)
     if (!commands.isEmpty()) Automate(commands);
     m_UsingAutomate = false;
     m_AutomateLog.clear();
+    m_AutomatePluginParameter = "";
 }
 
+void MainWindow::ManageAutomateListsDialog()
+{
+    ManageAutomation ma(m_automateLists);
+    ma.exec();
+    UpdateAutomationMenu();
+}
 
 bool MainWindow::Automate(const QStringList &commands)
 {
     // store away the set of resources selected in BookBrowser at the start
     QList<Resource*> selected_resources = m_BookBrowser->AllSelectedResources();
-    PluginDB *pdb = PluginDB::instance();
-    QHash<QString, Plugin *> plugins = pdb->all_plugins();
+    QHash<QString, Plugin *> plugins = PluginDB::instance().all_plugins();
     QStringList plugin_names = plugins.keys();
     bool has_error = false;
+    int countReplaced = -1;
     
     foreach(QString cmd , commands) {
         bool success = false;
@@ -419,6 +386,9 @@ bool MainWindow::Automate(const QStringList &commands)
 
             success = prunner.getResult() == "success";
             plugin_type = prunner.getPluginType();
+            // plugin done rubnning clear any set plugin parameter
+            m_AutomatePluginParameter = "";
+            
         } else if (AUTOMATE_TOOLS.contains(cmd)) {
             if (cmd == "Save")                            success = Save();
             else if (cmd == "WellFormedCheckEpub")        success = WellFormedCheckEpub();
@@ -429,6 +399,7 @@ bool MainWindow::Automate(const QStringList &commands)
             else if (cmd == "DeleteUnusedMedia")          success = DeleteUnusedMedia(true);
             else if (cmd == "DeleteUnusedStyles")         success = DeleteUnusedStyles(true);
             else if (cmd == "StandardizeEpub")            success = StandardizeEpub();
+            else if (cmd == "UseStanadrdFileExtensions")  success = UseStandardFileExtensions();
             else if (cmd == "SplitOnSGFSectionMarkers")   success = SplitOnSGFSectionMarkers();
             else if (cmd == "AddCover")                   success = AddCover();
             else if (cmd == "GenerateTOC")                success = GenerateTOC(true);
@@ -460,14 +431,24 @@ bool MainWindow::Automate(const QStringList &commands)
                 // these tools are epub3 specific
                 QString version = m_Book->GetOPF()->GetEpubVersion();
                 if (version.startsWith('3')) {
-                    if (cmd == "GenerateNCXGuideFromNav")     success = GenerateNCXGuideFromNav();
-                    if (cmd == "RemoveNCXGuideFromEpub3")     success = RemoveNCXGuideFromEpub3();
-                    if (cmd == "UpdateManifestProperties")    success = UpdateManifestProperties();
+                    if (cmd == "GenerateNCXGuideFromNav")  success = GenerateNCXGuideFromNav();
+                    if (cmd == "RemoveNCXGuideFromEpub3")  success = RemoveNCXGuideFromEpub3();
+                    if (cmd == "UpdateManifestProperties") success = UpdateManifestProperties();
+                    if (cmd == "RemoveNavFromSpine")       success = RemoveNavFromSpine();
+                    if (cmd == "AddNavToSpine")            success = AddNavToSpine(false);
+                    if (cmd == "AddNavToSpineNonLinear")   success = AddNavToSpine(true);
+                    
                 } else {
                     ShowMessageOnStatusBar(cmd + " " + tr("skipped since not an epub3"));
                     success = true;
                 }
             }
+
+        // Allow Automate to set a Plugin Parameter
+        } else if (cmd.startsWith("SetPluginParameter")) {
+            m_AutomatePluginParameter  = cmd.mid(19, -1).trimmed();
+            success = true;
+
         // handle saved search and its full name parameter     
         } else if (cmd.startsWith("RunSavedSearchReplaceAll")) {
             QString fullname = cmd.mid(25, -1).trimmed();
@@ -478,13 +459,60 @@ bool MainWindow::Automate(const QStringList &commands)
                 // Temporarily reroute FindReplace Messages to the Status Bar so they are logged
                 connect(m_FindReplace, SIGNAL(ShowMessageRequest(const QString &)),
                         this, SLOT(ShowMessageOnStatusBar(const QString &)));
-                m_FindReplace->ReplaceAllSearch();
+                countReplaced = m_FindReplace->ReplaceAllSearch();
                 disconnect(m_FindReplace, SIGNAL(ShowMessageRequest(const QString &)),
                            this, SLOT(ShowMessageOnStatusBar(const QString &)));
                 success = true;
             } else {
                 ShowMessageOnStatusBar(tr("Missing or unknown Saved Search name") + ": " + cmd);
                 success = false;
+            }
+        // handle On Failed conditional saved search and its full name parameter
+        } else if (cmd.startsWith("OnFailedRunSavedSearchReplaceAll")) {
+            if (countReplaced == 0) {
+                QString fullname = cmd.mid(33, -1).trimmed();
+                m_SearchEditor->SetCurrentEntriesFromFullName(fullname);
+
+                if (m_SearchEditor->GetCurrentEntriesCount() > 0) {
+                    // m_FindReplace handles deleting each searchEntry that was created with new
+                    // Temporarily reroute FindReplace Messages to the Status Bar so they are logged
+                    connect(m_FindReplace, SIGNAL(ShowMessageRequest(const QString &)),
+                            this, SLOT(ShowMessageOnStatusBar(const QString &)));
+                    countReplaced = m_FindReplace->ReplaceAllSearch();
+                    disconnect(m_FindReplace, SIGNAL(ShowMessageRequest(const QString &)),
+                            this, SLOT(ShowMessageOnStatusBar(const QString &)));
+                    success = true;
+                } else {
+                    ShowMessageOnStatusBar(tr("Missing or unknown Saved Search name") + ": " + cmd);
+                    success = false;
+                }
+            } else {
+                ShowMessageOnStatusBar(tr("Conditional search did not run.") + ": " + cmd);
+                success = true;
+            }
+
+        // handle On Success conditional saved search and its full name parameter
+        } else if (cmd.startsWith("OnSuccessRunSavedSearchReplaceAll")) {
+            if (countReplaced > 0) {
+                QString fullname = cmd.mid(34, -1).trimmed();
+                m_SearchEditor->SetCurrentEntriesFromFullName(fullname);
+
+                if (m_SearchEditor->GetCurrentEntriesCount() > 0) {
+                    // m_FindReplace handles deleting each searchEntry that was created with new
+                    // Temporarily reroute FindReplace Messages to the Status Bar so they are logged
+                    connect(m_FindReplace, SIGNAL(ShowMessageRequest(const QString &)),
+                            this, SLOT(ShowMessageOnStatusBar(const QString &)));
+                    countReplaced = m_FindReplace->ReplaceAllSearch();
+                    disconnect(m_FindReplace, SIGNAL(ShowMessageRequest(const QString &)),
+                            this, SLOT(ShowMessageOnStatusBar(const QString &)));
+                    success = true;
+                } else {
+                    ShowMessageOnStatusBar(tr("Missing or unknown Saved Search name") + ": " + cmd);
+                    success = false;
+                }
+            } else {
+                ShowMessageOnStatusBar(tr("Conditional Search did not run.") + ": " + cmd);
+                success = true;
             }
         } else {
             ShowMessageOnStatusBar(tr("Missing or unknown plugin or tool") + ": " + cmd);
@@ -505,7 +533,7 @@ bool MainWindow::Automate(const QStringList &commands)
                 QMessageBox msgBox;
                 msgBox.setModal(false);
                 msgBox.setText(tr("Validation tool found errors - Abort or Ignore?"));
-                QPushButton * abortButton = msgBox.addButton(QMessageBox::Abort);
+                msgBox.addButton(QMessageBox::Abort);
                 QPushButton * ignoreButton = msgBox.addButton(QMessageBox::Ignore);
                 bool button_clicked = false;
                 connect(&msgBox, &QMessageBox::buttonClicked, this, [this, &button_clicked]() { button_clicked = true; });
@@ -540,8 +568,6 @@ bool MainWindow::Automate(const QStringList &commands)
 // Actions can be removed
 void MainWindow::loadPluginsMenu()
 {
-    PluginDB *pdb = PluginDB::instance();
-
     m_menuPlugins = ui.menuPlugins;
     m_actionManagePlugins = ui.actionManage_Plugins;
     
@@ -561,7 +587,7 @@ void MainWindow::loadPluginsMenu()
         i++;
     }
 
-    QHash<QString, Plugin *> plugins = pdb->all_plugins();
+    QHash<QString, Plugin *> plugins = PluginDB::instance().all_plugins();
 
     // first set default icons for quick launch plugin buttons
     // Do we need this?  Aren't these set in Form_Files/main.ui
@@ -666,13 +692,89 @@ void MainWindow::unloadPluginsMenu()
     }
 }
 
+
+void MainWindow::UpdateAutomationMenu()
+{
+    m_menuAutomate = ui.menuAutomate;
+    QAction* automate_menu_action = ui.menuAutomate->menuAction();
+
+    m_actionManageAutomate = ui.actionManage_AutomateLists;
+
+    // first dismantle any existing Automation menus
+    if (m_menuAutomate != NULL) {
+        if (m_menuAutomateRun != NULL) {
+            disconnect(m_menuAutomateRun, SIGNAL(triggered(QAction *)), this, SLOT(runAutomate(QAction *)));
+            m_menuAutomateRun->clear();
+            m_menuAutomate->removeAction(m_menuAutomateRun->menuAction());
+            m_menuAutomateRun = NULL;
+        }
+        disconnect(m_actionManageAutomate, SIGNAL(triggered()), this, SLOT(ManageAutomateListsDialog()));
+        foreach(QAction * aa, m_auactions) {
+            if (aa) {
+                disconnect(aa, &QAction::triggered, this, nullptr);
+            }
+        }
+    }
+
+    // rebuild the Automation Lists menus
+    connect(m_actionManageAutomate, SIGNAL(triggered()), this, SLOT(ManageAutomateListsDialog()));
+
+    // Setup up for quick launch of automation lists
+    int i = 0;
+    foreach(QAction* aa, m_auactions){
+        // Use the new signal/slot syntax and use a lambda to
+        // eliminate the need for the obsoleted QSignalMapper.
+        // [captured variables]() {...anonymous processing to do...;}
+        connect(aa, &QAction::triggered, this, [this,i]() {
+            MainWindow::QuickLaunchAutomate(i);
+        });
+        i++;
+    }
+    
+    // build a current list of automation lists
+    QString directoryPath = Utility::DefinePrefsDir();
+    QStringList nameFilters = QStringList() << "automate*.txt";
+    m_automateLists.clear();
+    QDirIterator it(directoryPath, nameFilters, QDir::Files | QDir::NoDotAndDotDot);
+    while (it.hasNext()) {
+        it.next();
+        QString key = it.fileName();
+        if (key.startsWith("automate") && key.endsWith(".txt")) {
+            int nc = key.length() - 12; // 12 is length of "automate" + ".txt"
+            QString lname = key.sliced(8, nc);
+            if (!lname.isEmpty()) {
+                m_automateLists << lname;
+            }
+        }
+    }
+    QStringList keys = m_automateLists;
+    keys.sort(Qt::CaseInsensitive);
+
+    foreach(QString key, keys) {
+        if (!key.isEmpty()) {
+            // add it to run menu
+            if (m_menuAutomateRun == NULL) {
+                m_menuAutomateRun  = m_menuAutomate->addMenu(tr("Run"));
+                connect(m_menuAutomateRun,  SIGNAL(triggered(QAction *)), this, SLOT(runAutomate(QAction *)));
+            }
+            m_menuAutomateRun->addAction(key);
+        }
+    }
+    
+    updateToolTipsOnAutomateIcons();
+    
+    SettingsStore settings;
+    automate_menu_action->setVisible(settings.automateShowMenu());
+
+}
+
 bool MainWindow::StandardizeEpub()
 {
     SaveTabData();
 
     // ask to be sure
     QMessageBox::StandardButton button_pressed;
-    button_pressed = QMessageBox::warning(this, tr("Sigil"), 
+    button_pressed = Utility::warning(this, tr("Sigil"), 
                                       tr("Are you sure you want to restructure this epub?\nThis action cannot be reversed."), 
                                       QMessageBox::Ok | QMessageBox::Cancel);
     if (button_pressed != QMessageBox::Ok) {
@@ -685,7 +787,7 @@ bool MainWindow::StandardizeEpub()
     QList<HTMLResource *> htmlresources = m_Book->GetHTMLResources();
     foreach (HTMLResource * hresource, htmlresources) {
         if (!hresource->FileIsWellFormed()) {
-            QMessageBox::warning(this, tr("Sigil"), 
+            Utility::warning(this, tr("Sigil"), 
                                  tr("Restructure cancelled: %1, XML not well formed.").arg(hresource->ShortPathName()));
             QApplication::restoreOverrideCursor();
             return false;
@@ -694,7 +796,7 @@ bool MainWindow::StandardizeEpub()
     // make sure opf is in good shape as well
     OPFResource* opfresource = m_Book->GetOPF();
     if (!opfresource->FileIsWellFormed()) {
-        QMessageBox::warning(this, tr("Sigil"),
+        Utility::warning(this, tr("Sigil"),
                              tr("Restructure cancelled: %1, XML not well formed.").arg(opfresource->ShortPathName()));
         QApplication::restoreOverrideCursor();
         return false;
@@ -702,7 +804,7 @@ bool MainWindow::StandardizeEpub()
     // ditto for ncx if one exists
     NCXResource* ncxresource = m_Book->GetNCX();
     if (ncxresource && !ncxresource->FileIsWellFormed()) {
-        QMessageBox::warning(this, tr("Sigil"),
+        Utility::warning(this, tr("Sigil"),
                              tr("Restructure cancelled: %1, XML not well formed.").arg(ncxresource->ShortPathName()));
         QApplication::restoreOverrideCursor();
         return false;
@@ -773,9 +875,132 @@ bool MainWindow::StandardizeEpub()
     m_BookBrowser->Refresh();
     m_Book->SetModified();
     QApplication::restoreOverrideCursor();
+
+    // Update the titlebar
+    QString epubversion = m_Book->GetConstOPF()->GetEpubVersion();
+    if (m_Book->GetFolderKeeper()->EpubInSigilStandardForm()) {
+        setWindowTitle(tr("%1[*] - epub%2 - %3").arg(m_CurrentFileName).arg(epubversion).arg(tr("Sigil [std]")));
+    } else {
+        setWindowTitle(tr("%1[*] - epub%2 - %3").arg(m_CurrentFileName).arg(epubversion).arg(tr("Sigil")));
+    }
     ShowMessageOnStatusBar(tr("Restructure completed."));
     return true;
 }
+
+
+bool MainWindow::UseStandardFileExtensions()
+{
+    SaveTabData();
+
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+
+    // perform well-formed check on all the html resources
+    QList<HTMLResource *> htmlresources = m_Book->GetHTMLResources();
+    foreach (HTMLResource * hresource, htmlresources) {
+        if (!hresource->FileIsWellFormed()) {
+            Utility::warning(this, tr("Sigil"), 
+                                 tr("Bulk rename cancelled: %1, XML not well formed.").arg(hresource->ShortPathName()));
+            QApplication::restoreOverrideCursor();
+            return false;
+        }
+    }
+    // make sure opf is in good shape as well
+    OPFResource* opfresource = m_Book->GetOPF();
+    if (!opfresource->FileIsWellFormed()) {
+        Utility::warning(this, tr("Sigil"),
+                             tr("Bulk rename cancelled: %1, OPF not well formed.").arg(opfresource->ShortPathName()));
+        QApplication::restoreOverrideCursor();
+        return false;
+    }
+
+    QList<Resource*> resources;
+    QStringList newfilenames;
+    
+    // first special case the opf and ncx by handling them first
+    QString opfname = m_Book->GetOPF()->Filename();
+    if (!opfname.endsWith(".opf")) {
+        QStringList parts = opfname.split('.');
+        if (parts.size() > 1) {
+            parts.last() = "opf";
+        } else {
+            parts << "opf";
+        }
+        resources << m_Book->GetOPF();
+        newfilenames << parts.join('.');
+    }
+    NCXResource * ncx = m_Book->GetNCX();
+    if (ncx) {
+        QString ncxname = ncx->Filename();
+        if (!ncxname.endsWith(".ncx")) {
+            QStringList parts = ncxname.split('.');
+            if (parts.size() > 1) {
+                parts.last() = "ncx";
+            } else {
+                parts << "ncx";
+            }
+            resources << m_Book->GetNCX();
+            newfilenames << parts.join('.');
+        }
+    }
+    if (!newfilenames.isEmpty()) {
+        m_BookBrowser->RenameResourceList(resources, newfilenames);
+    }
+
+    //now handle all other files
+    newfilenames.clear();
+    resources.clear();
+
+    foreach(Resource* resource, m_Book->GetFolderKeeper()->GetResourceList()) {
+        QString aname = resource->Filename();
+        QString mt = resource->GetMediaType();
+        QString ext = MediaTypes::instance().GetFileExtFromMediaType(mt);
+        if (!ext.isEmpty()) {
+            if (!aname.endsWith("." + ext)) {
+                QStringList parts = aname.split('.');
+                if (parts.size() > 1) {
+                    parts.last() = ext;
+                } else {
+                    parts << ext;
+                }
+                resources << resource;
+                newfilenames << parts.join('.');
+            }
+        }
+    }
+    if (!newfilenames.isEmpty()) {
+        m_BookBrowser->RenameResourceList(resources, newfilenames);
+    }
+
+    // update what is needed
+    m_Book->GetFolderKeeper()->updateShortPathNames();
+    m_BookBrowser->Refresh();
+    m_Book->SetModified();
+    QApplication::restoreOverrideCursor();
+
+    ShowMessageOnStatusBar(tr("Bulk rename completed."));
+    return true;
+}
+
+
+bool MainWindow::RebaseManifestIDs()
+{
+    SaveTabData();
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    OPFResource* opfresource = m_Book->GetOPF();
+    if (!opfresource->FileIsWellFormed()) {
+        Utility::warning(this, tr("Sigil"),
+                             tr("Rebase cancelled: %1, XML not well formed.").arg(opfresource->ShortPathName()));
+        QApplication::restoreOverrideCursor();
+        return false;
+    }
+    opfresource->RebaseManifestIDs();
+    m_BookBrowser->Refresh();
+    m_Book->SetModified();
+    QApplication::restoreOverrideCursor();
+    ShowMessageOnStatusBar(tr("Rebase completed."));
+    return true;
+}
+
 
 void MainWindow::FixDuplicateFilenames()
 {
@@ -810,7 +1035,7 @@ void MainWindow::MoveContentFilesToStdFolders()
     QString MainFolder = m_Book->GetFolderKeeper()->GetFullPathToMainFolder();
     QDir epub_root(MainFolder);
     foreach(Resource* resource, resources) {
-        QString group = MediaTypes::instance()->GetGroupFromMediaType(resource->GetMediaType(), "other");
+        QString group = MediaTypes::instance().GetGroupFromMediaType(resource->GetMediaType(), "other");
         if ((group == "other") || group.isEmpty()) continue;
         QString stdfolder = m_Book->GetFolderKeeper()->GetStdFolderForGroup(group);
         QString filename = resource->Filename();
@@ -837,6 +1062,7 @@ bool MainWindow::RepoCommit()
     QApplication::setOverrideCursor(Qt::WaitCursor);
 
     // make sure that the Sigil-Preferences directory has a "repo" folder
+    // and a tempwork folder inside of it
     QString localRepo = Utility::DefinePrefsDir() + "/repo";
     QDir repoDir(localRepo);
     if (!repoDir.exists()) {
@@ -875,7 +1101,7 @@ bool MainWindow::RepoCommit()
     // now perform the commit using python in a separate thread since this
     // may take a while depending on the speed of the filesystem
     PythonRoutines pr;
-    QFuture<QString> future = QtConcurrent::run(&pr, &PythonRoutines::PerformRepoCommitInPython, 
+    QFuture<QString> future = QtConcurrent::run(&PythonRoutines::PerformRepoCommitInPython, &pr,
                                                 localRepo, bookid, bookinfo, bookroot, bookfiles);
     future.waitForFinished();
     QString commit_result = future.result();
@@ -919,7 +1145,7 @@ void MainWindow::RepoCheckout(QString bookid, QString destdir, QString filename,
     // now perform the operation using python in a separate thread since this
     // may take a while depending on the speed of the filesystem
     PythonRoutines pr;
-    QFuture<QStringList> future = QtConcurrent::run(&pr, &PythonRoutines::GetRepoTagsInPython, 
+    QFuture<QStringList> future = QtConcurrent::run(&PythonRoutines::GetRepoTagsInPython, &pr,
                                                          localRepo, bookid);
     future.waitForFinished();
     QStringList tag_results = future.result();
@@ -960,8 +1186,7 @@ void MainWindow::RepoCheckout(QString bookid, QString destdir, QString filename,
     open_tab_positions << m_TabManager->GetCurrentContentTab()->GetCursorPosition();
     
     QApplication::setOverrideCursor(Qt::WaitCursor);
-
-    QFuture<QString> afuture = QtConcurrent::run(&pr, &PythonRoutines::GenerateEpubFromTagInPython, 
+    QFuture<QString> afuture = QtConcurrent::run(&PythonRoutines::GenerateEpubFromTagInPython, &pr,
                                                  localRepo, bookid, tagname, filename, destdir);
     afuture.waitForFinished();
     QString epub_result = afuture.result();
@@ -1013,6 +1238,11 @@ void MainWindow::RepoDiff(QString bookid)
         ShowMessageOnStatusBar(tr("Diff Failed. No checkpoints found"));
         return;
     }
+    QString workRepo = localRepo + "/tempwork";
+    QDir repoWorkDir(workRepo);
+    if (!repoWorkDir.exists()) {
+        repoWorkDir.mkpath(workRepo);
+    }
     if (bookid.isEmpty()) {
         // use current epub's bookid and create one if needed
         bookid = m_Book->GetOPF()->GetUUIDIdentifierValue();
@@ -1029,7 +1259,7 @@ void MainWindow::RepoDiff(QString bookid)
     // Get tags using python in a separate thread since this
     // may take a while depending on the speed of the filesystem
     PythonRoutines pr;
-    QFuture<QStringList> future = QtConcurrent::run(&pr, &PythonRoutines::GetRepoTagsInPython, 
+    QFuture<QStringList> future = QtConcurrent::run(&PythonRoutines::GetRepoTagsInPython, &pr,
                                                           localRepo, bookid);
     future.waitForFinished();
     QStringList tag_results = future.result();
@@ -1055,9 +1285,9 @@ void MainWindow::RepoDiff(QString bookid)
     }
 
     // checkout this tag version and copy it to a tempfolder
-    TempFolder destdir;
+    TempFolder destdir(workRepo);
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    QFuture<QString> cfuture = QtConcurrent::run(&pr, &PythonRoutines::CopyTagToDestDirInPython, 
+    QFuture<QString> cfuture = QtConcurrent::run(&PythonRoutines::CopyTagToDestDirInPython, &pr,
                                                  localRepo, bookid, chkpoint1, destdir.GetPath() );
     cfuture.waitForFinished();
     QString copied = cfuture.result();
@@ -1069,9 +1299,9 @@ void MainWindow::RepoDiff(QString bookid)
     bookfiles << "META-INF/container.xml";
 
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    QFuture<QList<QStringList> > dfuture = QtConcurrent::run(&pr, 
-                                             &PythonRoutines::GetCurrentStatusVsDestDirInPython, 
-                                             bookroot, bookfiles, destdir.GetPath());
+    
+    QFuture<QList<QStringList> > dfuture = QtConcurrent::run(&PythonRoutines::GetCurrentStatusVsDestDirInPython,
+                                             &pr, bookroot, bookfiles, destdir.GetPath());
     dfuture.waitForFinished();
     QList<QStringList> sres = dfuture.result();
     QApplication::restoreOverrideCursor();
@@ -1081,7 +1311,7 @@ void MainWindow::RepoDiff(QString bookid)
     QStringList mlist(sres.at(2));
 
     if (dlist.isEmpty() && alist.isEmpty() && mlist.isEmpty()) {
-        QMessageBox::information(this, tr("Results of Comparison"), tr("No differences were found."));
+        Utility::information(this, tr("Results of Comparison"), tr("No differences were found."));
         return;
     } 
 
@@ -1095,6 +1325,111 @@ void MainWindow::RepoManage()
     ManageRepos mr(this);
     mr.exec();
 }
+
+void MainWindow::RepoEditTagDescription()
+{
+    QString localRepo = Utility::DefinePrefsDir() + "/repo";
+    QDir repoDir(localRepo);
+    if (!repoDir.exists()) {
+        // No repo folder, no checkpoints
+        ShowMessageOnStatusBar(tr("Description Edit Failed. No checkpoints found"));
+        return;
+    }
+    QString bookid;
+    bookid = m_Book->GetOPF()->GetUUIDIdentifierValue();
+
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    // Get tags using python in a separate thread since this
+    // may take a while depending on the speed of the filesystem
+    PythonRoutines pr;
+    QFuture<QStringList> future = QtConcurrent::run(&PythonRoutines::GetRepoTagsInPython, &pr,
+                                                          localRepo, bookid);
+    future.waitForFinished();
+    QStringList tag_results = future.result();
+    if (tag_results.isEmpty()) {
+        ShowMessageOnStatusBar(tr("Description Edit Failed. No checkpoints found"));
+        QApplication::restoreOverrideCursor();
+        return;
+    }
+    QApplication::restoreOverrideCursor();
+
+    // Now use a Dialog to allow the user to select the tag to edit
+    QString tagname;
+    QStringList taglst;
+    SelectCheckpoint gettag(tag_results, this);
+    if (gettag.exec() == QDialog::Accepted) {
+        taglst  = gettag.GetSelectedEntries();
+        if (!taglst.isEmpty()) {
+            tagname = taglst.at(0);
+        }
+    }
+    if (tagname.isEmpty()) {
+        ShowMessageOnStatusBar(tr("Description Edit Failed. No checkpoint selected to edit"));
+        return;
+    }
+
+    // Get current tag message of selected tag
+    QString currmsg;
+    foreach(QString atag, tag_results) {
+        QStringList fields = atag.split("|");
+        if (fields.length() == 3) {
+            if (fields.at(0) == tagname)
+            currmsg = fields.at(2);
+        }
+    }
+
+    // Use QInputDialog to get new tag message
+    // Is multi line necessary here?
+    bool ok;
+    QString newmessage = QInputDialog::getMultiLineText(this, tr("Edit checkpoint Description"),
+                                                        tr("New Checkpoint Description:"), currmsg.trimmed(), &ok);
+
+    // Update Tag message with new message
+    if (ok && !newmessage.isEmpty()) {
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        PythonRoutines pr;
+        QFuture<bool> afuture = QtConcurrent::run(&PythonRoutines::ChangeRepoTagMsgInPython, &pr,
+                                                 localRepo, bookid, tagname, newmessage);
+        afuture.waitForFinished();
+        bool res = afuture.result();
+        if (!res) {
+            ShowMessageOnStatusBar(tr("Description Edit Failed for unknown reason"));
+            QApplication::restoreOverrideCursor();
+            return;
+        }
+        QApplication::restoreOverrideCursor();
+    } else {
+        ShowMessageOnStatusBar(tr("Description edit cancelled or empty"));
+        return;
+    }
+    ShowMessageOnStatusBar(tr("Description successfully updated"));
+}
+
+
+void MainWindow::RepoShowLog()
+{
+    QString bookid = m_Book->GetOPF()->GetUUIDIdentifierValue();
+    QString localRepo = Utility::DefinePrefsDir() + "/repo/";
+
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+
+    // generate the repo log using python in a separate thread since this
+    // may take a while depending on the speed of the filesystem
+    PythonRoutines pr;
+    QFuture<QString> future =
+    QtConcurrent::run(&PythonRoutines::GenerateRepoLogSummaryInPython,
+                      &pr,
+                      localRepo,
+                      bookid);
+    future.waitForFinished();
+    QString logData = future.result();
+
+    QApplication::restoreOverrideCursor();
+
+    RepoLog log(tr("Repository Log"), logData, this);
+    log.exec();
+}
+
 
 void MainWindow::launchExternalXEditor()
 {
@@ -1115,6 +1450,10 @@ void MainWindow::launchExternalXEditor()
         opf_resource = qobject_cast<OPFResource *>(tab->GetLoadedResource());
     }
 
+    // get currenttext position if xhtml file is currently being edited
+    int filepos = -1;
+    if (html_resource) filepos = tab->GetCursorPosition();
+
     SettingsStore ss;
     QString XEditorPath = ss.externalXEditorPath();
     if (XEditorPath.isEmpty()) {
@@ -1130,7 +1469,7 @@ void MainWindow::launchExternalXEditor()
     }
 
     //bool isPageEdit = ss.externalXEditorPath().contains("pageedit", Qt::CaseInsensitive);
-    bool isPageEdit = (xeditorinfo.baseName().toLower() == "pageedit");
+    bool isPageEdit = xeditorinfo.baseName().toLower().startsWith("pageedit");
     // qDebug() << "External editor is PageEdit: " << isPageEdit;
 
     if (isPageEdit) {
@@ -1152,6 +1491,7 @@ void MainWindow::launchExternalXEditor()
         resource = m_Book->GetOPF();
 
         // an OPF Resource could be used to access every xhtml file in the spine
+        // including the nav no matter if present in the spine or not
         // so save all of these resources to disk and set a fswatcher on them
         QList<Resource *> all_resources = m_Book->GetFolderKeeper()->GetResourceList();
         QList<Resource*> spine_resources = m_Book->GetOPF()->GetSpineOrderResources(all_resources);
@@ -1180,7 +1520,7 @@ void MainWindow::launchExternalXEditor()
             }
         }
 
-        if (OpenExternally::openFileWithXEditor(resource->GetFullPath(), XEditorPath, spinenum)) {
+        if (OpenExternally::openFileWithXEditor(resource->GetFullPath(), XEditorPath, spinenum, filepos)) {
             m_Book->GetFolderKeeper()->WatchResourceFile(resource);
             ShowMessageOnStatusBar(tr("Executing PageEdit Xhtml Editor"));
             return;
@@ -1222,6 +1562,10 @@ void MainWindow::runPlugin(QAction *action)
     qApp->processEvents();
 }
 
+QList<Resource*>  MainWindow::GetBookBrowserSelectedResources() {
+    return m_BookBrowser->AllSelectedResources();
+}
+
 void MainWindow::SelectResources(QList<Resource *> resources)
 {
     return m_BookBrowser->SelectResources(resources);
@@ -1237,6 +1581,24 @@ QList <Resource *> MainWindow::GetValidSelectedHTMLResources()
 QList <Resource *> MainWindow::GetValidSelectedCSSResources()
 {
     return m_BookBrowser->ValidSelectedCSSResources();
+}
+
+
+QList <Resource *> MainWindow::GetValidSelectedSVGResources()
+{
+    return m_BookBrowser->ValidSelectedSVGResources();
+}
+
+
+QList <Resource *> MainWindow::GetValidSelectedJSResources()
+{
+    return m_BookBrowser->ValidSelectedJSResources();
+}
+
+
+QList <Resource *> MainWindow::GetValidSelectedMiscXMLResources()
+{
+    return m_BookBrowser->ValidSelectedMiscXMLResources();
 }
 
 
@@ -1261,6 +1623,12 @@ QList <Resource *> MainWindow::GetAllHTMLResources()
 QList <Resource *> MainWindow::GetAllCSSResources()
 {
     return m_BookBrowser->AllCSSResources();
+}
+
+
+QString MainWindow::GetOPFMetadataXML()
+{
+    return m_Book->GetOPF()->GetMetadataXML();
 }
 
 
@@ -1421,7 +1789,7 @@ void MainWindow::OpenUrl(const QUrl &url)
         OpenResource(resource, line, -1, QString(), url.fragment());
     } else {
         QMessageBox::StandardButton button_pressed;
-        button_pressed = QMessageBox::warning(this, tr("Sigil"), tr("Are you sure you want to open this external link?\n\n%1").arg(url.toString()), QMessageBox::Ok | QMessageBox::Cancel);
+        button_pressed = Utility::warning(this, tr("Sigil"), tr("Are you sure you want to open this external link?\n\n%1").arg(url.toString()), QMessageBox::Ok | QMessageBox::Cancel);
 
         if (button_pressed == QMessageBox::Ok) {
             QDesktopServices::openUrl(url);
@@ -1459,7 +1827,6 @@ void MainWindow::ResourceUpdatedFromDisk(Resource *resource)
     SettingsStore ss;
     QString message = QString(tr("File")) + " " + resource->ShortPathName() + " " + tr("was updated") + ".";
     int duration = 10000;
-
     if (resource->Type() == Resource::HTMLResourceType) {
         HTMLResource *html_resource = qobject_cast<HTMLResource *>(resource);
         if (!m_Book->IsDataOnDiskWellFormed(html_resource)) {
@@ -1468,7 +1835,8 @@ void MainWindow::ResourceUpdatedFromDisk(Resource *resource)
             duration = 20000;
         }
     }
-
+    // we should force a cache clear so that the external file changes appear
+    if (m_PreviewWindow) m_PreviewWindow->setCacheClearNeeded();
     ShowMessageOnStatusBar(message, duration);
 }
 
@@ -1490,22 +1858,35 @@ void MainWindow::ShowMessageOnStatusBar(const QString &message,
 
 void MainWindow::ShowLastOpenFileWarnings()
 {
+    if (m_inShowLastOpenWarnings) return;
+    m_inShowLastOpenWarnings = true;
     if (!m_LastOpenFileWarnings.isEmpty()) {
-        Utility::DisplayStdWarningDialog(
-            "<p><b>" %
-            tr("Opening this EPUB generated warnings.") %
-            "</b></p><p>" %
-            tr("Select Show Details for more information.") %
-            "</p>",
-            m_LastOpenFileWarnings.join("\n"));
+        foreach(QString info, m_LastOpenFileWarnings) {
+            QString msg;
+            QString details;
+            if (!info.isEmpty()) {
+                if (info.contains(QChar(31))) {
+                    QStringList warning = info.split(QChar(31), Qt::KeepEmptyParts);
+                    msg = warning[0];
+                    details = warning[1];
+                } else {
+                    msg = info;
+                    details = "";
+                }
+                Utility::DisplayStdWarningDialog( 
+                "<p><b>" %
+                tr("Warning: ") % msg %
+                "</b><p>", details, this);
+            }
+        }
         m_LastOpenFileWarnings.clear();
     }
+    m_inShowLastOpenWarnings = false;
 }
 
 void MainWindow::showEvent(QShowEvent *event)
 {
     m_IsInitialLoad = false;
-
     QMainWindow::showEvent(event);
 }
 
@@ -1531,29 +1912,9 @@ void MainWindow::DebugCurrentWidgetSizes()
     }
 }
 
-// somehow this routine needs to detect that the mainwindow has
-// been maximized or made fullscreen *before* that WindowState
-// has been set.
-bool MainWindow::isMaxOrFull() {
-    bool result = isMaximized() || isFullScreen();
-    return result; 
-}
-
 void MainWindow::moveEvent(QMoveEvent *event)
 {
-    DWINGEO qDebug() << "------";
-    DWINGEO qDebug() << "In moveEvent with maximized or full" << isMaxOrFull();
-
-    // Workaround for Qt bug - see WriteSettings() for details.
-    if (!m_PendingLastSizeUpdate && !isMaxOrFull()) {
-        DWINGEO qDebug() << "issuing a LastSizeUpdate request";
-        m_PendingLastSizeUpdate = true;
-        // delay long enough for WindowState to be properly set if Maximized or FullScreened
-        QTimer::singleShot(1000, this, SLOT(UpdateLastSizes()));
-    }
-
     DWINGEO DebugCurrentWidgetSizes();
-
     QMainWindow::moveEvent(event);
 }
 
@@ -1567,23 +1928,11 @@ void MainWindow::moveEvent(QMoveEvent *event)
 
 void MainWindow::resizeEvent(QResizeEvent *event)
 {
-    DWINGEO qDebug() << "------";
-    DWINGEO qDebug() << "in ResizeEvent with maximized or full" << isMaxOrFull();
     DWINGEO qDebug() << "old size: " << event->oldSize();
     DWINGEO qDebug() << "new size: " << event->size();
     DWINGEO qDebug() << "primary screen total size: " << qApp->primaryScreen()->geometry();
     DWINGEO qDebug() << "primary screen available size: " << qApp->primaryScreen()->availableGeometry();
-
-    // Workaround for Qt bug - see WriteSettings() for details.
-    if (!m_PendingLastSizeUpdate && !isMaxOrFull()) {
-        DWINGEO qDebug() << "issuing a LastSizeUpdate request";
-        m_PendingLastSizeUpdate = true;
-        // delay long enough for WindowState to be properly set if Maximize or FullScreen
-        QTimer::singleShot(1000, this, SLOT(UpdateLastSizes()));
-    }
-
     DWINGEO DebugCurrentWidgetSizes();
-
     QMainWindow::resizeEvent(event);
 }
 
@@ -1601,6 +1950,10 @@ void MainWindow::closeEvent(QCloseEvent *event)
     disconnect(&m_PreviewTimer, SIGNAL(timeout()), this, SLOT(UpdatePreview()));
 
     DBG qDebug() << "in close event before maybe save";
+
+#if 0
+    bool find_was_open = m_FindReplace->isVisible();
+#endif
 
     // this should be done first to save all geometry
     // extra saves should not be an issue if the window close is abandoned
@@ -1621,8 +1974,7 @@ void MainWindow::closeEvent(QCloseEvent *event)
 #endif
         ShowMessageOnStatusBar(tr("Sigil is closing..."));
 
-        KeyboardShortcutManager *sm = KeyboardShortcutManager::instance();
-        sm->removeActionsOf(this);
+        KeyboardShortcutManager::instance().removeActionsOf(this);
 
         // The user may have unsaved search/clip/index/meta entries if dialogs are open.
         // Prompt them to save or discard their changes if any.
@@ -1647,17 +1999,17 @@ void MainWindow::closeEvent(QCloseEvent *event)
             m_PreviewWindow->hide();
         }
 
-#ifdef Q_OS_MAC
-        // Qt BUG:  macOS can not be left in fullscreen or maximized mode upon exit
-        if (isFullScreen()) setWindowState(windowState() & ~Qt::WindowFullScreen);
-        if (isMaximized()) setWindowState(windowState() & ~Qt::WindowMaximized);
-#endif
         event->accept();
     } else {
         event->ignore();
         SetupPreviewTimer();
-        // re-enable the ability to record good last normal sizes
-        m_SaveLastEnabled = true;
+
+#if 0
+        // WriteSettings closes F&R if open so reopen if needed
+        if (find_was_open) {
+            QTimer::singleShot(10, this, SLOT(Find()));
+        }
+#endif
         m_IsClosing = false;
     }
 }
@@ -1706,10 +2058,8 @@ void MainWindow::Open()
             filter_string += filter + ";;";
         }
         QString default_filter = c_LoadFilters.value("epub");
-        QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-        options = options | QFileDialog::DontUseNativeDialog;
-#endif
+        QFileDialog::Options options = Utility::DlgOptions();
+
         QString filename = QFileDialog::getOpenFileName(this,
                            tr("Open File"),
                            m_LastFolderOpen,
@@ -1752,7 +2102,7 @@ void MainWindow::OpenRecentFile()
             if (!QFile::exists(filename)) {
                 QMessageBox::StandardButton button_pressed;
                 const QString &msg = tr("This file no longer exists. Click OK to remove it from the menu.\n%1");
-                button_pressed = QMessageBox::warning(this, tr("Sigil"),
+                button_pressed = Utility::warning(this, tr("Sigil"),
                                                       msg.arg(filename), QMessageBox::Ok | QMessageBox::Cancel);
 
                 if (button_pressed == QMessageBox::Ok) {
@@ -1804,8 +2154,17 @@ bool MainWindow::SaveAs()
     QString save_path       = "";
     QString default_filter  = "";
 
-    if (m_CurrentFilePath.isEmpty()) {
-        m_CurrentFilePath = (m_CurrentFileName.isEmpty())?DEFAULT_FILENAME:m_CurrentFileName;
+    QString main_title = m_Book->GetOPF()->GetPrimaryBookTitle();
+    QString sanitized_title = Utility::CleanFileName(main_title);
+
+    QString proposed_name;
+    if ((m_CurrentFileName.isEmpty() || m_CurrentFileName == DEFAULT_FILENAME) && !sanitized_title.isEmpty() && sanitized_title[0] != '[') {
+        proposed_name = sanitized_title + ".epub";
+    } else {
+        proposed_name = QFileInfo(m_CurrentFilePath).fileName();
+        if (proposed_name.isEmpty()) {
+            proposed_name = (m_CurrentFileName.isEmpty())?DEFAULT_FILENAME:m_CurrentFileName;
+        }
     }
 
     if (m_LastFolderOpen.isEmpty()) {
@@ -1814,19 +2173,15 @@ bool MainWindow::SaveAs()
 
     // If we can save this file type, then we use the current filename
     if (c_SaveFilters.contains(QFileInfo(m_CurrentFilePath).suffix().toLower())) {
-        save_path       = m_LastFolderOpen + "/" + QFileInfo(m_CurrentFilePath).fileName();
+        save_path       = m_LastFolderOpen + "/" + proposed_name;
         default_filter  = c_SaveFilters.value(QFileInfo(m_CurrentFilePath).suffix().toLower());
     }
     // If not, we change the extension to EPUB
     else {
-        save_path       = m_LastFolderOpen + "/" + QFileInfo(m_CurrentFilePath).completeBaseName() + ".epub";
+        save_path       = m_LastFolderOpen + "/" + QFileInfo(proposed_name).completeBaseName() + ".epub";
         default_filter  = c_SaveFilters.value("epub");
     }
-    QFileDialog::Options options = QFileDialog::Options();
-#if !defined(Q_OS_WIN32)
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
-
+    QFileDialog::Options options = Utility::DlgOptions("LinuxUseNonNative");
 
     QString filename = QFileDialog::getSaveFileName(this,
                        tr("Save File"),
@@ -1858,6 +2213,10 @@ bool MainWindow::SaveAs()
 
     if (!save_result) {
         m_CurrentFilePath.clear();
+    } else {
+        // Save OK
+        m_CurrentFileName = QFileInfo(filename).fileName();
+        m_CurrentFilePath = filename;
     }
 
     return save_result;
@@ -1878,10 +2237,8 @@ bool MainWindow::SaveACopy()
     filters.removeDuplicates();
     QString filter_string = "*.epub";
     QString default_filter  = "*.epub";
-    QFileDialog::Options options = QFileDialog::Options();
-#if !defined(Q_OS_WIN32)
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions("LinuxUseNonNative");
+
     QString filename = QFileDialog::getSaveFileName(this,
                        tr("Save a Copy"),
                        m_SaveACopyFilename,
@@ -1987,7 +2344,7 @@ void MainWindow::ViewImageDialog(const QUrl &url)
             m_ViewImage->ShowImage(resource->GetFullPath());
         }
     } catch (ResourceDoesNotExist&) {
-        QMessageBox::warning(this, tr("Sigil"), tr("Image does not exist: ") + image_bookpath);
+        Utility::warning(this, tr("Sigil"), tr("Image does not exist: ") + image_bookpath);
     }
 }
 
@@ -2040,7 +2397,27 @@ void MainWindow::GoToLinkedStyleDefinition(const QString &element_name, const QS
                 }
             }
         }
-
+        // if nothing found try one last time looking in selectors with combinators for a close match
+        if (!found_match) {
+            QString sel1 = element_name + "." + style_class_name + " ";
+            QString sel2 = "." + style_class_name + " ";
+            foreach(QString bookpath, stylesheets) {
+                Resource * resource = m_Book->GetFolderKeeper()->GetResourceByBookPath(bookpath);
+                CSSResource *css_resource = qobject_cast<CSSResource*>( resource );
+                if (css_resource) {
+                    CSSInfo css_info(css_resource->GetText());
+                    QList<CSSInfo::CSSSelector*> combinators = css_info.getAllSelectorsWithCombinators();
+                    foreach(CSSInfo::CSSSelector* selector, combinators) {
+                        QString asel = selector->text;
+                        if (asel.startsWith(sel1) || asel.startsWith(sel2)) {
+                            m_TabManager->OpenResource(css_resource, -1, selector->pos);
+                            found_match = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         if (!found_match) {
             QString display_name;
 
@@ -2132,7 +2509,7 @@ bool MainWindow::ProceedWithUndefinedUrlFragments()
                                 " Splitting or merging under these conditions can result in broken links.</p>"
                                 "<p>Do you still wish to continue?</p></html>");
 
-        button_pressed = QMessageBox::warning(this, tr("Sigil"),
+        button_pressed = Utility::warning(this, tr("Sigil"),
                                 msg.arg(std::get<1>(result), std::get<2>(result)),
                                 QMessageBox::Yes | QMessageBox::No);
         if (button_pressed != QMessageBox::Yes) {
@@ -2141,6 +2518,19 @@ bool MainWindow::ProceedWithUndefinedUrlFragments()
         return true;
     }
     return true;
+}
+
+
+void MainWindow::AddDroppedFiles(const QStringList& filepaths)
+{
+    if (!filepaths.isEmpty()) {
+        QStringList added_book_paths = m_BookBrowser->AddExisting(false, false, filepaths);
+        if (!added_book_paths.isEmpty()) {
+            m_BookBrowser->Refresh();
+            m_Book->SetModified();
+	    ShowMessageOnStatusBar(tr("Dropped files added."));
+	}
+    }
 }
 
 
@@ -2175,26 +2565,26 @@ bool MainWindow::AddCover()
     QApplication::setOverrideCursor(Qt::WaitCursor);
 
     // Find existing cover HTML file if there is one.
+    // First collect information on semantic codes already set to find existing html cover
+    QHash<QString, QStringList> semantic_code_info;
+    if (version.startsWith('3')) {
+        NavProcessor navproc(m_Book->GetConstOPF()->GetNavResource());
+        semantic_code_info = navproc.GetLandmarkCodeForPaths();
+    } else {
+        semantic_code_info = m_Book->GetOPF()->GetSemanticCodeForPaths();
+    }
+
     HTMLResource *html_cover_resource = NULL;
-    QList<HTMLResource *> html_resources;
     QList<Resource *> resources = GetAllHTMLResources();
+
     foreach(Resource * resource, resources) {
         HTMLResource *html_resource = qobject_cast<HTMLResource *>(resource);
-
         if (html_resource) {
-            html_resources.append(html_resource);
-
             // Check if this is an existing cover file.
-            QString semantic_code;
-            if (version.startsWith('3')) {
-                NavProcessor navproc(m_Book->GetConstOPF()->GetNavResource());
-                semantic_code = navproc.GetLandmarkCodeForResource(html_resource);
-            } else {
-                semantic_code = m_Book->GetOPF()->GetGuideSemanticCodeForResource(html_resource);
-            }
-            if (semantic_code == "cover") {
+            QStringList semcodes = semantic_code_info.value(html_resource->GetRelativePath(), QStringList() << "");
+            if (semcodes.contains("cover")) {
                 html_cover_resource = html_resource;
-            } else if (resource->Filename().toLower() == HTML_COVER_FILENAME && html_cover_resource == NULL) {
+            } else if (html_resource->Filename().toLower() == HTML_COVER_FILENAME && html_cover_resource == NULL) {
                 html_cover_resource = html_resource;
             }
         }
@@ -2209,9 +2599,15 @@ bool MainWindow::AddCover()
 
     // Populate the HTML cover file with the necessary text.
     // If a template file exists, use its text for the cover source.
-    QString text = HTML_COVER_SOURCE;
-    if (version.startsWith('3')) text = HTML5_COVER_SOURCE;
-    QString cover_path = Utility::DefinePrefsDir() + "/" + HTML_COVER_FILENAME;
+    QString text;
+    QString cover_path;
+    if (version.startsWith('3')) {
+        text = HTML5_COVER_SOURCE;
+        cover_path = Utility::DefinePrefsDir() + "/cover-template3.xhtml";
+    } else {
+        text = HTML_COVER_SOURCE;
+        cover_path = Utility::DefinePrefsDir() + "/cover-template2.xhtml";
+    }
     if (QFile::exists(cover_path)) {
         text = Utility::ReadUnicodeTextFile(cover_path);
     }
@@ -2282,6 +2678,21 @@ bool MainWindow::AddCover()
     return true;
 }
 
+bool MainWindow::UpdateManifestMediaTypes()
+{
+
+    SaveTabData();
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    m_Book->GetFolderKeeper()->SuspendWatchingResources();
+    m_Book->SaveAllResourcesToDisk();
+    m_Book->GetFolderKeeper()->ResumeWatchingResources();
+    QList<Resource*> all_resources = m_Book->GetFolderKeeper()->GetResourceList();
+    m_Book->GetOPF()->UpdateManifestMediaTypes(all_resources);
+    m_Book->SetModified();
+    ShowMessageOnStatusBar(tr("OPF Manifest Mimetypes Updated."));
+    QApplication::restoreOverrideCursor();
+    return true;
+}
 
 bool MainWindow::UpdateManifestProperties()
 {
@@ -2299,6 +2710,48 @@ bool MainWindow::UpdateManifestProperties()
     QApplication::restoreOverrideCursor();
     return true;
 }
+
+bool MainWindow::RemoveNavFromSpine()
+{
+    QString version = m_Book->GetConstOPF()->GetEpubVersion();
+    if (!version.startsWith('3')) {
+        ShowMessageOnStatusBar(tr("Not Available for epub2."));
+        return false;
+    }
+    SaveTabData();
+    Resource * navrsc = m_Book->GetConstOPF()->GetNavResource();
+    m_Book->GetOPF()->RemoveResourceFromSpine(navrsc);
+    ShowMessageOnStatusBar(tr("Nav removed from OPF Spine."));
+    m_BookBrowser->BookContentModified();
+    m_BookBrowser->Refresh();
+    m_Book->SetModified();
+    return true;
+}
+
+bool MainWindow::AddNavToSpine() { return AddNavToSpine(false); }
+bool MainWindow::AddNavToSpineNonLinear() { return AddNavToSpine(true); }
+
+bool MainWindow::AddNavToSpine(bool nonlinear)
+{
+    QString version = m_Book->GetConstOPF()->GetEpubVersion();
+    if (!version.startsWith('3')) {
+        ShowMessageOnStatusBar(tr("Not Available for epub2."));
+        return false;
+    }
+    SaveTabData();
+    Resource * navrsc = m_Book->GetConstOPF()->GetNavResource();
+    m_Book->GetOPF()->AppendResourceToSpine(navrsc, nonlinear);
+    if (nonlinear) {
+        ShowMessageOnStatusBar(tr("Nav added to OPF Spine with linear=\"no\""));
+    } else {
+        ShowMessageOnStatusBar(tr("Nav added to OPF Spine."));
+    }
+    m_BookBrowser->BookContentModified();
+    m_BookBrowser->Refresh();
+    m_Book->SetModified();
+    return true;
+}
+
 
 
 bool MainWindow::RemoveNCXGuideFromEpub3()
@@ -2322,6 +2775,9 @@ bool MainWindow::RemoveNCXGuideFromEpub3()
     // clear the guide
     m_Book->GetOPF()->ClearSemanticCodesInGuide();
 
+    // and finally remove any old meta for the cover image
+    m_Book->GetOPF()->RemoveExistingEpub2CoverMeta();
+    
     m_TableOfContents->Refresh();
     m_BookBrowser->BookContentModified();
     m_BookBrowser->Refresh();
@@ -2381,8 +2837,8 @@ bool MainWindow::GenerateNCXGuideFromNav()
 
     // Now build the ncx in python in a separate thread since may be an long job
     PythonRoutines pr;
-    QFuture<QString> future = QtConcurrent::run(&pr, &PythonRoutines::GenerateNcxInPython, navdata, 
-                                                navbkpath, ncxdir, doctitle, mainid);
+    QFuture<QString> future = QtConcurrent::run(&PythonRoutines::GenerateNcxInPython, &pr, navdata, 
+                                             navbkpath, ncxdir, doctitle, mainid);
     future.waitForFinished();
     QString ncxdata = future.result();
 
@@ -2401,25 +2857,30 @@ bool MainWindow::GenerateNCXGuideFromNav()
 
     // collect all of the current nav landmark codes
     NavProcessor navproc(nav_resource);
-    QHash<QString, QString> nav_landmark_codes = navproc.GetLandmarkCodeForPaths();
 
-    // Walk through all html resources and if they have a landmark code
-    // lookup its equivalent in the guide and set it if it exists
-    QList<Resource *> html_resources = GetAllHTMLResources();
-    foreach(Resource * resource, html_resources) {
-        HTMLResource *html_resource = qobject_cast<HTMLResource *>(resource);
+    QStringList landmark_info = navproc.GetAllLandmarkInfoByBookPath();
+
+    // Walk through the landmark info and convert to guide entries where possible
+    foreach(QString lm, landmark_info) {
+        HTMLResource * html_resource = nullptr;
+        QStringList parts = lm.split(QChar(30), Qt::KeepEmptyParts);
+        // parts(0)=bookpath, parts(1)=fragment, parts(2)=code, parts.at(3)=title
+        Resource* resource = m_Book->GetFolderKeeper()->GetResourceByBookPathNoThrow(parts.at(0));
+        if (resource) html_resource = qobject_cast<HTMLResource *>(resource);
         if (html_resource) {
-            QString respath = resource->GetRelativePath();
-            if (nav_landmark_codes.contains(respath)) {
-                QString landmark_code = nav_landmark_codes[respath];
-                QString guide_code =  Landmarks::instance()->GuideLandMapping(landmark_code);
-                if (!guide_code.isEmpty()) {
-                    m_Book->GetOPF()->AddGuideSemanticCode(html_resource, guide_code, false);
-                }
+            QString guide_code =  Landmarks::instance().GuideLandMapping(parts.at(2));
+            if (!guide_code.isEmpty()) {
+                m_Book->GetOPF()->AddGuideSemanticCode(html_resource, guide_code, false, parts.at(1));
             }
         }
     }
 
+    // add back in Epub2 Cover Meta if needed
+    QString cover_bookpath = m_Book->GetOPF()->GetCoverImagePath();
+    Resource * cover_resource = m_Book->GetFolderKeeper()->GetResourceByBookPathNoThrow(cover_bookpath);
+    if (cover_resource) {
+        m_Book->GetOPF()->AddEpub2CoverMeta(cover_resource);
+    }
     m_TableOfContents->Refresh();
     m_BookBrowser->BookContentModified();
     m_BookBrowser->Refresh();
@@ -2464,44 +2925,56 @@ void MainWindow::CreateIndex()
     }
 
     // get semantic (guide/landmark) information for all resources
-    QHash <QString, QString> semantic_types;
     QString version = m_Book->GetOPF()->GetEpubVersion();
     HTMLResource * nav_resource = m_Book->GetConstOPF()->GetNavResource();
+    QHash <QString, QStringList> semantic_codes;
     if (version.startsWith('3')) {
         if (nav_resource) {
             NavProcessor navproc(nav_resource);
-            semantic_types = navproc.GetLandmarkCodeForPaths();
+            semantic_codes = navproc.GetLandmarkCodeForPaths();
+        } else {
+            semantic_codes = m_Book->GetOPF()->GetSemanticCodeForPaths();
         }
     } else {
-        semantic_types = m_Book->GetOPF()->GetSemanticCodeForPaths();
+        semantic_codes = m_Book->GetOPF()->GetSemanticCodeForPaths();
     }
     QStringList allow_index;
     allow_index  << "bodymatter" << "chapter" << "conclusion" << "division" << "epilogue" << 
                     "introduction" << "part" << "preamble" << "prologue" << "subchapter" <<  
                     "text" << "volume"; 
 
-    HTMLResource *index_resource = NULL;
+    HTMLResource *index_resource = nullptr;
 
     QList<HTMLResource *> html_resources;
 
     // Turn the list of Resources that are really HTMLResources to a real list
     // of HTMLResources stripping out any front or back matter
+    
     QList<Resource *> resources = GetAllHTMLResources();
     foreach(Resource * resource, resources) {
+        QStringList codeslist;
+        bool keepit = false;
         HTMLResource *html_resource = qobject_cast<HTMLResource *>(resource);
-
+    
         if (html_resource) {
-            QString resource_path = html_resource->GetRelativePath();
-            QString semantic_code;
-            if (semantic_types.contains(resource_path)) {
-                semantic_code = semantic_types[resource_path];
-            }
-            if (semantic_code.isEmpty() || allow_index.contains(semantic_code)) {
-                html_resources.append(html_resource);
-            }
 
+            QString resource_path = html_resource->GetRelativePath();
+            
+            codeslist = semantic_codes.value(resource_path, QStringList());
+            if (codeslist.isEmpty()) {
+                keepit = true;
+            }
+        
+            if (!keepit) {   
+                foreach(QString code, allow_index) {
+                    if (codeslist.contains(code)) keepit = true;
+                }
+            }
+            
+            if (keepit) html_resources.append(html_resource);
+            
             // Check if this is an existing index file.
-            if (semantic_code == "index") {
+            if (codeslist.contains("index")) {
                 index_resource = html_resource;
             } else if (resource->Filename() == HTML_INDEX_FILE && html_resource == NULL) {
                 index_resource = html_resource;
@@ -2509,21 +2982,21 @@ void MainWindow::CreateIndex()
         }
     }
 
-    if (index_resource != NULL) {
+    if (index_resource) {
         QString msg = tr("An existing Index file has been found.");
         if (!ProceedToOverwrite(msg, index_resource->ShortPathName())) {
-            index_resource = NULL;
+            index_resource = nullptr;
         }
     }
 
     // Close the tab so the focus saving doesn't overwrite the text were
     // replacing in the resource.
-    if (index_resource != NULL) {
+    if (index_resource) {
         m_TabManager->CloseTabForResource(index_resource);
     }
 
     // Create an HTMLResource for the INDEX if it doesn't exist.
-    if (index_resource == NULL) {
+    if (index_resource == nullptr) {
         index_resource = m_Book->CreateEmptyHTMLFile();
         index_resource->RenameTo(HTML_INDEX_FILE);
     }
@@ -2548,8 +3021,8 @@ void MainWindow::CreateIndex()
     QString stylebookpath = styleresource->GetRelativePath();
 
     // Write out the HTML index file.
-    IndexHTMLWriter index(indexbookpath, stylebookpath);
-    index_resource->SetText(index.WriteXML(version));
+    IndexHTMLWriter makeindex(indexbookpath, stylebookpath);
+    index_resource->SetText(makeindex.WriteXML(version));
 
     // Normally Setting a semantic on a resource that already has it set will remove the semantic.
     //  Pass along toggle as false to disable this default behaviour
@@ -2621,7 +3094,7 @@ void MainWindow::ReportsDialog()
     m_Book->GetFolderKeeper()->ResumeWatchingResources();
 
     if (!m_Book.data()->GetNonWellFormedHTMLFiles().isEmpty()) {
-        QMessageBox::warning(this, tr("Sigil"), tr("Reports cancelled due to XML not well formed."));
+        Utility::warning(this, tr("Sigil"), tr("Reports cancelled due to XML not well formed."));
         QApplication::restoreOverrideCursor();
         return;
     }
@@ -2717,7 +3190,7 @@ bool MainWindow::DeleteUnusedMedia(bool in_automate)
 {
     SaveTabData();
     if (!m_Book.data()->GetNonWellFormedHTMLFiles().isEmpty()) {
-        QMessageBox::warning(this, tr("Sigil"), tr("Delete Unused Media Files cancelled due to XML not well formed."));
+        Utility::warning(this, tr("Sigil"), tr("Delete Unused Media Files cancelled due to XML not well formed."));
         return false;
     }
 
@@ -2750,6 +3223,8 @@ bool MainWindow::DeleteUnusedMedia(bool in_automate)
 
     style_bookpaths.removeDuplicates();
 
+    QString cover_image_bookpath = m_Book->GetConstOPF()->GetCoverImagePath();
+
     foreach(Resource * resource, m_BookBrowser->AllMediaResources()) {
         QString filepath = resource->GetRelativePath();
 
@@ -2757,7 +3232,7 @@ bool MainWindow::DeleteUnusedMedia(bool in_automate)
         if (html_files_hash[filepath].count() == 0 && !style_bookpaths.contains(filepath)) {
             // If used as cover image, consider it referenced.
             ImageResource *image_resource = qobject_cast<ImageResource *>(resource);
-            if (!image_resource || !m_Book->GetOPF()->IsCoverImage(image_resource)) {
+            if (!image_resource || (filepath != cover_image_bookpath)) {
                 resources.append(resource);
             }
         }
@@ -2770,7 +3245,8 @@ bool MainWindow::DeleteUnusedMedia(bool in_automate)
         if (in_automate) {
             ShowMessageOnStatusBar(tr("There are no unused image, video or audio files to delete."));
         } else {
-            QMessageBox::information(this, tr("Sigil"), tr("There are no unused image, video or audio files to delete."));
+            // Utility::information(this, tr("Sigil"), tr("There are no unused image, video or audio files to delete."));
+            Utility::information(this, tr("Sigil"), tr("There are no unused image, video or audio files to delete."));
         }
     }
     return true;
@@ -2780,16 +3256,21 @@ bool MainWindow::DeleteUnusedStyles(bool in_automate)
 {
     SaveTabData();
     if (!m_Book.data()->GetNonWellFormedHTMLFiles().isEmpty()) {
-        QMessageBox::warning(this, tr("Sigil"), tr("Delete Unused Styles cancelled due to XML not well formed."));
+        Utility::warning(this, tr("Sigil"), tr("Delete Unused Styles cancelled due to XML not well formed."));
         return false;
     }
 
+    // get list of any media overlay active class selectors from the opf
+    QStringList activeclassselectors = m_Book->GetOPF()->GetMediaOverlayActiveClassSelectors();
+    
     // This one handles all selector types
     QList<BookReports::StyleData *> css_selector_usage = BookReports::GetAllCSSSelectorsUsed(m_Book, true);
     QList<BookReports::StyleData *> css_selectors_to_delete;
     foreach(BookReports::StyleData *selector, css_selector_usage) {
         if (selector->html_filename.isEmpty()) {
-            css_selectors_to_delete.append(selector);
+            if (!activeclassselectors.contains(selector->css_selector_text)) {
+                css_selectors_to_delete.append(selector);
+            }
         }
     }
 
@@ -2799,7 +3280,7 @@ bool MainWindow::DeleteUnusedStyles(bool in_automate)
         if (in_automate) {
             ShowMessageOnStatusBar(tr("There are no unused stylesheet selectors to delete."));
         } else {
-            QMessageBox::information(this, tr("Sigil"), tr("There are no unused stylesheet selectors to delete."));
+            Utility::information(this, tr("Sigil"), tr("There are no unused stylesheet selectors to delete."));
         }
     }
     qDeleteAll(css_selector_usage);
@@ -2813,7 +3294,7 @@ void MainWindow::InsertFileDialog()
 
     FlowTab *flow_tab = GetCurrentFlowTab();
     if (!flow_tab || !flow_tab->InsertFileEnabled()) {
-        QMessageBox::warning(this, tr("Sigil"), tr("You cannot insert a file at this position."));
+        Utility::warning(this, tr("Sigil"), tr("You cannot insert a file at this position."));
         return;
     }
 
@@ -2919,7 +3400,7 @@ void MainWindow::InsertId()
 
     FlowTab *flow_tab = GetCurrentFlowTab();
     if (!flow_tab || !flow_tab->InsertIdEnabled()) {
-        QMessageBox::warning(this, tr("Sigil"), tr("You cannot insert an id at this position."));
+        Utility::warning(this, tr("Sigil"), tr("You cannot insert an id at this position."));
         return;
     }
 
@@ -2935,12 +3416,80 @@ void MainWindow::InsertId()
         QRegularExpressionMatch mo = invalid_id.match(selected_id);
 
         if (mo.hasMatch()) {
-            QMessageBox::warning(this, tr("Sigil"), tr("ID is invalid - must start with a letter, followed by letter number _ : - or ."));
+            Utility::warning(this, tr("Sigil"), tr("ID is invalid - must start with a letter, followed by letter number _ : - or ."));
             return;
         };
 
         if (!flow_tab->InsertId(select_id.GetId())) {
-            QMessageBox::warning(this, tr("Sigil"), tr("You cannot insert an id at this position."));
+            Utility::warning(this, tr("Sigil"), tr("You cannot insert an id at this position."));
+        }
+    }
+}
+
+
+void MainWindow::InsertClip()
+{
+    SaveTabData();
+    ShowMessageOnStatusBar();
+
+    FlowTab *flow_tab = GetCurrentFlowTab();
+    if (!flow_tab) {
+        Utility::warning(this, tr("Sigil"), tr("You can only insert an aria clips in xhtml files."));
+        return;
+    }
+    HTMLResource* html_resource = qobject_cast<HTMLResource*>(flow_tab->GetLoadedResource());
+    QString book_lang;
+    if (html_resource) book_lang = html_resource->GetLanguageAttribute();
+    if (book_lang.isEmpty()) {
+        book_lang = m_Book->GetOPF()->GetPrimaryBookLanguage();
+    }
+    
+    QString selected_text = flow_tab->GetSelectedText();
+    
+    
+    AddClips addclip(selected_text, book_lang, this);
+
+    if (addclip.exec() == QDialog::Accepted) {
+        QString new_clip = addclip.GetSelectedClip();
+        if (!new_clip.isEmpty()) {
+            if (!flow_tab->PasteClipText(new_clip)) {
+                Utility::warning(this, tr("Sigil"), tr("Inserting an aria clip failed."));
+                return;
+            }
+        }
+    }
+}
+
+void MainWindow::InsertRole()
+{
+    SaveTabData();
+    ShowMessageOnStatusBar();
+
+    FlowTab *flow_tab = GetCurrentFlowTab();
+    if (!flow_tab || !flow_tab->InsertRoleEnabled()) {
+        Utility::warning(this, tr("Sigil"), tr("You cannot insert an aria role at this position."));
+        return;
+    }
+
+    QString tagname = flow_tab->GetCurrentTag();
+    
+    AddRoles addmeaning(tagname, this);
+
+    if (addmeaning.exec() == QDialog::Accepted) {
+        QStringList codes = addmeaning.GetSelectedEntries();
+        if (!codes.isEmpty()) {
+            QString new_code = codes.at(0);
+            QStringList allowed_tags = AriaRoles::instance().AllowedTags(new_code);
+            if (!allowed_tags.isEmpty()) {
+                if (!allowed_tags.contains(tagname)) {
+                    Utility::warning(this, tr("Sigil"), tr("The selected role cannot be used on this tag."));
+                    return;
+                }
+                if (!flow_tab->InsertRole(new_code)) {
+                    Utility::warning(this, tr("Sigil"), tr("You cannot insert an aria role at this position."));
+                    return;
+                }
+            }
         }
     }
 }
@@ -2953,7 +3502,7 @@ void MainWindow::InsertHyperlink()
 
     FlowTab *flow_tab = GetCurrentFlowTab();
     if (!flow_tab || !flow_tab->InsertHyperlinkEnabled()) {
-        QMessageBox::warning(this, tr("Sigil"), tr("You cannot insert a link at this position."));
+        Utility::warning(this, tr("Sigil"), tr("You cannot insert a link at this position."));
         return;
     }
 
@@ -2966,12 +3515,12 @@ void MainWindow::InsertHyperlink()
     if (select_hyperlink.exec() == QDialog::Accepted) {
         QString target = select_hyperlink.GetTarget();
         if (target.contains("<") || target.contains(">")) {
-            QMessageBox::warning(this, tr("Sigil"), tr("Link is invalid - cannot contain '<' or '>'"));
+            Utility::warning(this, tr("Sigil"), tr("Link is invalid - cannot contain '<' or '>'"));
             return;
         };
 
         if (!flow_tab->InsertHyperlink(target)) {
-            QMessageBox::warning(this, tr("Sigil"), tr("You cannot insert a link at this position."));
+            Utility::warning(this, tr("Sigil"), tr("You cannot insert a link at this position."));
         }
     }
 }
@@ -2983,7 +3532,7 @@ void MainWindow::MarkForIndex()
 
     FlowTab *flow_tab = GetCurrentFlowTab();
     if (!flow_tab || !flow_tab->MarkForIndexEnabled()) {
-        QMessageBox::warning(this, tr("Sigil"), tr("You cannot mark an index at this position or without selecting text."));
+        Utility::warning(this, tr("Sigil"), tr("You cannot mark an index at this position or without selecting text."));
         return;
     }
 
@@ -2993,40 +3542,66 @@ void MainWindow::MarkForIndex()
     if (select_index_title.exec() == QDialog::Accepted) {
         QString entry = select_index_title.GetTitle();
         if (entry.contains("<") || entry.contains(">")) {
-            QMessageBox::warning(this, tr("Sigil"), tr("Entry is invalid - cannot contain '<' or '>'"));
+            Utility::warning(this, tr("Sigil"), tr("Entry is invalid - cannot contain '<' or '>'"));
             return;
         };
 
         if (!flow_tab->MarkForIndex(entry)) {
-            QMessageBox::warning(this, tr("Sigil"), tr("You cannot mark an index at this position."));
+            Utility::warning(this, tr("Sigil"), tr("You cannot mark an index at this position."));
         }
     }
 }
 
 void MainWindow::ApplicationPaletteChanged()
 {
-    // we need to force a full reload of all Tabs and Preview Window
-    // qDebug() << "ApplicationPaletteChanged";
-    m_TabManager->ReopenTabs();
+    // CodeView documents use hard coded syntax highlighting and line
+    // numbering colours (one set for light and one for dark).
+    // So we need to tell each CodeView in the TabManager to do a Refresh
+    // Same goes with AV, Image, Font, and Pdf tabs that inject dark
+    // css.  Same for our Preview Window.
+    DBG qDebug() << "ApplicationPaletteChanged";
+    m_TabManager->PerformThemeChangeRefresh();
     UpdatePreview();
 }
 
 void MainWindow::ApplicationFocusChanged(QWidget *old, QWidget *now)
 {
+    DBG qDebug() << "focus changed: " << old << now;
     QWidget *window = QApplication::activeWindow();
+    DBG qDebug() << "active window is: " << window;
+    
+    // sometimes QApplication::activeWindow() returns nullptr but
+    // the destination for focus (now) exists.  What we really
+    // need to know is the QMainWindow whose descendent is now
+    if (!window) {
+        DBG qDebug() << "searching for active window";
+        window = now;
+        while(window && !(qobject_cast<QMainWindow *>(window))) {
+            window = window->parentWidget();
+        }
+    }
 
+    DBG qDebug() << "final active window: " << window;
+    
     if (!window || !now) {
+        DBG qDebug() << "returning since no active window or no new focus point";
         // Nothing to do - application is exiting
         return;
     }
 
     // We are only interested in focus events that take place in this MainWindow
     if (window != this) {
+        DBG qDebug() << "returning since active window is not this: " << window << this;
         return;
     }
 
-    m_LastPasteTarget = dynamic_cast<PasteTarget *>(now);
-
+    // only update the last paste target when a new one paste target is moved to
+    PasteTarget* npt = dynamic_cast<PasteTarget*>(now);
+    if (npt) {
+        m_LastPasteTarget = npt;
+        DBG qDebug() << "updating m_LastPasteTarget to: " << m_LastPasteTarget;
+    }
+    
     // Update the zoom target based on current window.
     if (m_PreviewWindow->HasFocus()) {
         m_ZoomPreview = true;
@@ -3056,6 +3631,24 @@ void MainWindow::QuickLaunchPlugin(int i)
             { 
                 PluginRunner prunner(m_TabManager, this);
                 prunner.exec(pname);
+            }
+            qApp->processEvents();
+        }
+    }
+}
+
+void MainWindow::QuickLaunchAutomate(int i)
+{
+    SettingsStore ss;
+    QStringList namemap = ss.automateMap();
+    if ((i >= 0) && (namemap.count() > i)) {
+        QString lname = namemap.at(i);
+        if (m_automateLists.contains(lname)) {
+            // QApplication keeps a single modalWindowList across multiple main
+            // windows and this list is not updated until modal dialog is deleted
+            {
+                QString automatefile = Utility::DefinePrefsDir() + "/automate" + lname + ".txt";
+                RunAutomate(automatefile);
             }
             qApp->processEvents();
         }
@@ -3118,6 +3711,15 @@ void MainWindow::PasteClipEntriesIntoCurrentTarget(const QList<ClipEditorModel::
 
 void MainWindow::PasteClipEntriesIntoPreviousTarget(const QList<ClipEditorModel::clipEntry *> &clips)
 {
+    if (m_LastPasteTarget) {
+        bool applied = m_LastPasteTarget->PasteClipEntries(clips);
+        if (applied) {
+            // Clear the statusbar afterwards but only if entries were pasted.
+            ShowMessageOnStatusBar();
+            return;
+        }
+    }
+    // default to the CV tab if it is editable
     ContentTab *tab = GetCurrentContentTab();
     if (tab == NULL)  return;
     FlowTab *flow_tab = qobject_cast<FlowTab *>(tab);
@@ -3126,9 +3728,9 @@ void MainWindow::PasteClipEntriesIntoPreviousTarget(const QList<ClipEditorModel:
         ShowMessageOnStatusBar();
         return;
     }
-    CSSTab * css_tab = qobject_cast<CSSTab *>(tab);
-    if (css_tab && css_tab->PasteClipEntries(clips)) {
-        css_tab->setFocus();
+    TextTab * txt_tab = qobject_cast<TextTab *>(tab);
+    if (txt_tab && txt_tab->PasteClipEntries(clips)) {
+        txt_tab->setFocus();
         ShowMessageOnStatusBar();
     }
 }
@@ -3147,14 +3749,14 @@ void MainWindow::MergeResources(QList <Resource *> resources)
         Resource *resource = m_Book->PreviousResource(resources.first());
 
         if (!resource || resource == resources.first()) {
-            QMessageBox::warning(this, tr("Sigil"), tr("One resource selected and there is no previous resource to merge into."));
+            Utility::warning(this, tr("Sigil"), tr("One resource selected and there is no previous resource to merge into."));
             return;
         }
 
         resources.prepend(resource);
     } else {
         QMessageBox::StandardButton button_pressed;
-        button_pressed = QMessageBox::warning(this, tr("Sigil"),
+        button_pressed = Utility::warning(this, tr("Sigil"),
                                               tr("Are you sure you want to merge the selected files?\nThis action cannot be reversed."),
                                               QMessageBox::Ok | QMessageBox::Cancel);
 
@@ -3170,7 +3772,7 @@ void MainWindow::MergeResources(QList <Resource *> resources)
         if (htmlresource) html_resources << htmlresource;
     }
     if (!m_Book->CheckHTMLFilesForWellFormedness(html_resources)) {
-        QMessageBox::warning(this, tr("Sigil"), tr("Merge cancelled: XHTML files involved in merge are not well formed."));
+        Utility::warning(this, tr("Sigil"), tr("Merge cancelled: XHTML files involved in merge are not well formed."));
             return;
     }
 
@@ -3194,7 +3796,7 @@ void MainWindow::MergeResources(QList <Resource *> resources)
             UsedIds.insert(id);
         }
     }
-    QStringList Dups = Duplicates.toList();
+    QStringList Dups = Duplicates.values();
     if (!Dups.isEmpty()) {
         // if duplicates exist, run the SourceUpdates/FragmentUpdates
         QHash<QString, QString> Updates;
@@ -3229,7 +3831,7 @@ void MainWindow::MergeResources(QList <Resource *> resources)
 
     if (failed_resource != NULL) {
         QApplication::restoreOverrideCursor();
-        QMessageBox::critical(this, tr("Sigil"), tr("Cannot merge file %1").arg(failed_resource->ShortPathName()));
+        Utility::critical(this, tr("Sigil"), tr("Cannot merge file %1").arg(failed_resource->ShortPathName()));
         QApplication::setOverrideCursor(Qt::WaitCursor);
         resource_to_open = failed_resource;
     } else {
@@ -3261,7 +3863,7 @@ void MainWindow::LinkStylesheetsToResources(QList <Resource *> resources)
             continue;
         }
         if (!h->FileIsWellFormed()) {
-            QMessageBox::warning(this, tr("Sigil"), tr("Link Stylesheets cancelled: %1, XML not well formed.").arg(h->ShortPathName()));
+            Utility::warning(this, tr("Sigil"), tr("Link Stylesheets cancelled: %1, XML not well formed.").arg(h->ShortPathName()));
             return;
         }
     }
@@ -3460,7 +4062,7 @@ void MainWindow::LinkJavascriptsToResources(QList <Resource *> resources)
             continue;
         }
         if (!h->FileIsWellFormed()) {
-            QMessageBox::warning(this, tr("Sigil"), tr("Link Javascripts cancelled: %1, XML not well formed.").arg(\
+            Utility::warning(this, tr("Sigil"), tr("Link Javascripts cancelled: %1, XML not well formed.").arg(\
 h->ShortPathName()));
             return;
         }
@@ -3504,7 +4106,7 @@ h->ShortPathName()));
 QList<std::pair<QString, bool>> MainWindow::GetJavascriptsMap(QList<Resource *> resources)
 {
     QList<std::pair<QString, bool>> javascript_map;
-    QStringList mtypes = QStringList() << "application/javascript" << "text/javascript";
+    QStringList mtypes = QStringList() << "application/javascript" << "application/ecmascript" << "text/javascript";
     QList<Resource *> js_resources = m_Book->GetFolderKeeper()->GetResourceListByMediaTypes(mtypes);
     // Use the first resource to get a list of known linked javascripts in order.                                   
     QStringList checked_linked_bookpaths = GetJavascriptsAlreadyLinked(resources.at(0));
@@ -3538,7 +4140,7 @@ QStringList MainWindow::GetJavascriptsAlreadyLinked(Resource *resource)
     HTMLResource *html_resource = qobject_cast<HTMLResource *>(resource);
     QStringList linked_javascripts;
     QStringList existing_javascripts;
-    QStringList mtypes = QStringList() << "application/javascript" << "text/javascript";
+    QStringList mtypes = QStringList() << "application/javascript" << "application/ecmascript" << "text/javascript";
     foreach(Resource * js_resource, m_Book->GetFolderKeeper()->GetResourceListByMediaTypes(mtypes)) {
         existing_javascripts.append(js_resource->GetRelativePath());
     }
@@ -3676,7 +4278,11 @@ bool MainWindow::CreateHTMLTOC()
 
     // list is built in spine order by the BookBrowser
     QList<Resource *> resources = GetAllHTMLResources();
-
+    if (version.startsWith("3")) {
+        if (!m_Book->GetConstOPF()->isNavInSpine()) {
+            resources.removeOne(m_Book->GetConstOPF()->GetNavResource());
+        }
+    }
     foreach(Resource * resource, resources) {
         HTMLResource *htmlResource = qobject_cast<HTMLResource *>(resource);
         if (htmlResource) {
@@ -3704,11 +4310,12 @@ bool MainWindow::CreateHTMLTOC()
     }
  
     if (tocResource != NULL) {
-
+        QApplication::restoreOverrideCursor();
         QString msg = tr("An existing HTML Table of Contents file has been found.");
         if (!ProceedToOverwrite(msg, tocResource->ShortPathName())) {
             tocResource = NULL;
         }
+        QApplication::setOverrideCursor(Qt::WaitCursor);
     }
 
     // If you found an existing one, close the tab so the focus 
@@ -3727,7 +4334,7 @@ bool MainWindow::CreateHTMLTOC()
 
     // Get Primary language from the OPF and use it to Translate "toc" for title
     QString lang = m_Book->GetOPF()->GetPrimaryBookLanguage();
-    QString title = Landmarks::instance()->GetTitle("toc", lang); 
+    QString title = Landmarks::instance().GetTitle("toc", lang); 
     TOCHTMLWriter toc(tocResource->GetRelativePath(), 
                       css_resource->GetRelativePath(),
                       m_TableOfContents->GetRootEntry(),
@@ -3925,8 +4532,14 @@ void MainWindow::PreferencesDialog()
         // To ensure any font size changes are immediately applied.
         m_SelectCharacter->show();
     }
-
-    updateToolTipsOnPluginIcons();
+    SettingsStore ss;
+    if (ss.fileDropZoneEnabled()) {
+        m_lbDropZone->show();
+    } else {
+        m_lbDropZone->hide();
+    }
+    loadPluginsMenu();
+    UpdateAutomationMenu();
 }
 
 
@@ -3959,8 +4572,14 @@ void MainWindow::ManagePluginsDialog()
         // To ensure any font size changes are immediately applied.
         m_SelectCharacter->show();
     }
-
+    SettingsStore ss;
+    if (ss.fileDropZoneEnabled()) {
+        m_lbDropZone->show();
+    } else {
+        m_lbDropZone->hide();
+    }
     loadPluginsMenu();
+    UpdateAutomationMenu();
 }
 
 void MainWindow::updateToolTipsOnPluginIcons()
@@ -3972,6 +4591,19 @@ void MainWindow::updateToolTipsOnPluginIcons()
         QString pname = tr("RunPlugin") + QString::number(i+1);
         if (namemap.count() > i) pname = namemap.at(i);
         pa->setToolTip(pname);
+        i++;
+    }
+}
+
+void MainWindow::updateToolTipsOnAutomateIcons()
+{
+    SettingsStore ss;
+    QStringList namemap = ss.automateMap();
+    int i=0;
+    foreach(QAction* aa, m_auactions) {
+        QString lname = tr("RunAutomate") + QString::number(i+1);
+        if (namemap.count() > i) lname = namemap.at(i);
+        aa->setToolTip(lname);
         i++;
     }
 }
@@ -4007,6 +4639,19 @@ bool MainWindow::ValidateStylesheetsWithW3C()
 }
 
 
+bool MainWindow::RenameClassInHtml(const QString& oldname, const QString& newname)
+{
+    ContentTab *tab = GetCurrentContentTab();
+    CSSResource* css_resource = NULL;
+    if (tab != NULL) {
+        css_resource = qobject_cast<CSSResource *>(tab->GetLoadedResource());
+    }
+    if (css_resource == NULL) return false;
+    QString css_bookpath = css_resource->GetRelativePath();
+    SaveTabData();
+    return m_Book->RenameClassInHTML(css_bookpath, oldname, newname);
+}
+
 bool MainWindow::ReformatAllStylesheets(bool multiple_line_format)
 {
     SaveTabData();
@@ -4040,11 +4685,23 @@ void MainWindow::UpdateMWState(bool set_tab_state)
     ContentTab *tab = GetCurrentContentTab();
 
     if (tab == NULL) {
+        m_LastPasteTarget = nullptr;
+        DBG qDebug() << "UpdateMWState had current tab Null so reset m_LastPasteTarget";
         return;
     }
 
     Resource::ResourceType type = tab->GetLoadedResource()->Type();
 
+    if (type == Resource::ImageResourceType ||
+        type == Resource::VideoResourceType ||
+        type == Resource::AudioResourceType ||
+        type == Resource::PdfResourceType ||
+        type == Resource::FontResourceType) {
+        // change to non-text based tab which in no PasteTarget
+        m_LastPasteTarget = nullptr;
+        DBG qDebug() << "UpdateMWState, tab changed to non-text tab so reset m_LastPasteTarget: ";
+    }
+    
     if (type == Resource::HTMLResourceType) {
         if (set_tab_state) {
             FlowTab *ftab = qobject_cast<FlowTab *>(tab);
@@ -4105,7 +4762,7 @@ void MainWindow::UpdateUIOnTabChanges()
     float zoom_factor = GetZoomFactor();
     UpdateZoomLabel(zoom_factor);
     UpdateZoomSlider(zoom_factor);
-    UpdateCursorPositionLabel(tab->GetCursorLine(), tab->GetCursorColumn());
+    UpdateCursorPositionLabel(tab->GetCursorLine(), tab->GetCursorColumn(), tab->GetCursorCodepoint());
     SelectEntryOnHeadingToolbar(tab->GetCaretElementName());
 }
 
@@ -4135,6 +4792,7 @@ void MainWindow::UpdateUIOnTabCountChange()
 
 void MainWindow::SetStateActionsCodeView()
 {
+    bool editing_epub3 = m_Book->GetOPF()->GetEpubVersion().startsWith("3");
     ui.actionPrintPreview->setEnabled(true);
     ui.actionPrint->setEnabled(true);
     ui.actionSplitSection->setEnabled(true);
@@ -4142,6 +4800,8 @@ void MainWindow::SetStateActionsCodeView()
     ui.actionInsertFile->setEnabled(true);
     ui.actionInsertSpecialCharacter->setEnabled(true);
     ui.actionInsertId->setEnabled(true);
+    ui.actionInsertClip->setEnabled(editing_epub3);
+    ui.actionInsertRole->setEnabled(editing_epub3);
     ui.actionInsertHyperlink->setEnabled(true);
     ui.actionInsertClosingTag->setEnabled(true);
     ui.actionUndo->setEnabled(true);
@@ -4181,6 +4841,7 @@ void MainWindow::SetStateActionsCodeView()
     ui.actionCasingTitlecase ->setEnabled(true);
     ui.actionCasingCapitalize ->setEnabled(true);
     ui.actionFind->setEnabled(true);
+    ui.actionHideFind->setEnabled(true);
     ui.actionFindNext->setEnabled(true);
     ui.actionFindPrevious->setEnabled(true);
     ui.actionReplaceCurrent->setEnabled(true);
@@ -4188,6 +4849,9 @@ void MainWindow::SetStateActionsCodeView()
     ui.actionReplacePrevious->setEnabled(true);
     ui.actionReplaceAll->setEnabled(true);
     ui.actionCount->setEnabled(true);
+    ui.actionDryRun->setEnabled(true);
+    ui.actionFilterReplaceAll->setEnabled(true);
+    ui.actionRestartSearch->setEnabled(true);
     ui.actionMarkSelection->setEnabled(true);
     ui.menuSearchCurrentFile->setEnabled(true);
     ui.actionFindNextInFile->setEnabled(true);
@@ -4229,6 +4893,8 @@ void MainWindow::SetStateActionsRawView()
     ui.actionInsertFile->setEnabled(false);
     ui.actionInsertSpecialCharacter->setEnabled(true);
     ui.actionInsertId->setEnabled(false);
+    ui.actionInsertClip->setEnabled(false);
+    ui.actionInsertRole->setEnabled(false);
     ui.actionInsertHyperlink->setEnabled(false);
     ui.actionInsertClosingTag->setEnabled(false);
     ui.actionUndo->setEnabled(true);
@@ -4266,6 +4932,7 @@ void MainWindow::SetStateActionsRawView()
     ui.actionCasingTitlecase ->setEnabled(true);
     ui.actionCasingCapitalize ->setEnabled(true);
     ui.actionFind->setEnabled(true);
+    ui.actionHideFind->setEnabled(true);
     ui.actionFindNext->setEnabled(true);
     ui.actionFindPrevious->setEnabled(true);
     ui.actionReplaceCurrent->setEnabled(true);
@@ -4273,6 +4940,9 @@ void MainWindow::SetStateActionsRawView()
     ui.actionReplacePrevious->setEnabled(true);
     ui.actionReplaceAll->setEnabled(true);
     ui.actionCount->setEnabled(true);
+    ui.actionDryRun->setEnabled(true);
+    ui.actionFilterReplaceAll->setEnabled(true);
+    ui.actionRestartSearch->setEnabled(true);
     ui.actionMarkSelection->setEnabled(true);
     ui.menuSearchCurrentFile->setEnabled(true);
     ui.actionFindNextInFile->setEnabled(true);
@@ -4297,6 +4967,8 @@ void MainWindow::SetStateActionsStaticView()
     ui.actionInsertFile->setEnabled(false);
     ui.actionInsertSpecialCharacter->setEnabled(false);
     ui.actionInsertId->setEnabled(false);
+    ui.actionInsertClip->setEnabled(false);
+    ui.actionInsertRole->setEnabled(false);
     ui.actionInsertHyperlink->setEnabled(false);
     ui.actionInsertClosingTag->setEnabled(false);
     ui.actionUndo->setEnabled(false);
@@ -4334,6 +5006,7 @@ void MainWindow::SetStateActionsStaticView()
     ui.actionCasingTitlecase ->setEnabled(false);
     ui.actionCasingCapitalize ->setEnabled(false);
     ui.actionFind->setEnabled(false);
+    ui.actionHideFind->setEnabled(false);
     ui.actionFindNext->setEnabled(false);
     ui.actionFindPrevious->setEnabled(false);
     ui.actionReplaceCurrent->setEnabled(false);
@@ -4341,6 +5014,9 @@ void MainWindow::SetStateActionsStaticView()
     ui.actionReplacePrevious->setEnabled(false);
     ui.actionReplaceAll->setEnabled(false);
     ui.actionCount->setEnabled(false);
+    ui.actionDryRun->setEnabled(false);
+    ui.actionFilterReplaceAll->setEnabled(false);
+    ui.actionRestartSearch->setEnabled(false);
     ui.actionMarkSelection->setEnabled(false);
     ui.menuSearchCurrentFile->setEnabled(false);
     ui.actionFindNextInFile->setEnabled(false);
@@ -4359,8 +5035,10 @@ void MainWindow::SetStateActionsStaticView()
 
 void MainWindow::SetupPreviewTimer()
 {
+    SettingsStore ss;
+    int tv = ss.uiPreviewTimeout();
     m_PreviewTimer.setSingleShot(true);
-    m_PreviewTimer.setInterval(1000);
+    m_PreviewTimer.setInterval(tv);
     connect(&m_PreviewTimer, SIGNAL(timeout()), this, SLOT(UpdatePreview()));
     m_PreviewTimer.stop();
 }
@@ -4374,9 +5052,9 @@ void MainWindow::UpdatePreviewRequest()
     m_PreviewTimer.start();
 }
 
-void MainWindow::UpdatePreviewCSSRequest()
+void MainWindow::UpdatePreviewTabRequest()
 {
-    m_SaveCSS = true;
+    m_SaveTab = true;
     UpdatePreviewRequest();
 }
 
@@ -4423,10 +5101,12 @@ void MainWindow::UpdatePreview()
     ContentTab *tab = GetCurrentContentTab();
     if (tab != NULL) {
 
-        // Save CSS if update requested from CSS tab
-        if (m_SaveCSS) {
-            m_SaveCSS = false;
+        // Save Tab if update requested from a TextTab tab like CSS or SVG tabs
+        if (m_SaveTab) {
+            m_SaveTab = false;
             tab->SaveTabContent();
+            DBG qDebug() << "MW: UpdatePreview requested from CSS or SVG - saving tab content";
+            m_PreviewWindow->setCacheClearNeeded();
         }
 
         html_resource = qobject_cast<HTMLResource *>(tab->GetLoadedResource());
@@ -4450,7 +5130,7 @@ void MainWindow::UpdatePreview()
                 // signals are sent that it has changed which requests Preview to update
                 // so these need to be ignored.  Once the document is loaded it signals again.
                 if (!flow_tab->IsLoadingFinished()) {
-                    DBG qDebug() << "Flow Tab Is Loading Finished returned false";
+                    DBG qDebug() << "Flow Tab IsLoadingFinished returned false";
                     return;
                 }
                 text = flow_tab->GetText();
@@ -4460,6 +5140,10 @@ void MainWindow::UpdatePreview()
                 text = m_PreviousHTMLText;
                 if (m_PreviousHTMLResource) {
                     location = m_PreviewWindow->GetCaretLocation();
+                    if (location.isEmpty()) {
+                        location = m_PreviousHTMLLocation;
+                        DBG qDebug() << " *** call to GetCaretLocation returned as empty ***";
+                    }
                     DBG qDebug() << "MW: UpdatePreview using current PreviewWindow location";
                 } else {
                     location = m_PreviousHTMLLocation;
@@ -4471,8 +5155,12 @@ void MainWindow::UpdatePreview()
             m_PreviousHTMLText = text;
             m_PreviousHTMLLocation = location;
 
+            DBG qDebug() << "MW: Invoking UpdatePage with: " << html_resource->GetRelativePath();
+            DBG { foreach(ElementIndex ei, location) qDebug()<< "     name: " << ei.name << " index: " << ei.index;}
+
             bool res = m_PreviewWindow->UpdatePage(html_resource->GetFullPath(), text, location);
             if (!res) {
+                DBG qDebug() << "UpdatePage returned false! - retry";
                 m_PreviewTimer.start();
             }
         }
@@ -4486,12 +5174,16 @@ void MainWindow::InspectHTML()
     UpdatePreview();
 }
 
-void MainWindow::UpdateCursorPositionLabel(int line, int column)
+void MainWindow::UpdateCursorPositionLabel(int line, int column, int codepoint)
 {
+    QString name = "";
     if (line > 0 && column > 0) {
-        const QString l = QString::number(line);
-        const QString c = QString::number(column);
-        m_lbCursorPosition->setText(tr("Line: %1, Col: %2").arg(l).arg(c));
+        name = CodepointNames::instance().GetName(codepoint);
+	QString cp = " (" + QString("U+%1").arg(codepoint, 4, 16, QLatin1Char('0')).toUpper() + ")";
+        QString l = QString::number(line);
+        QString c = QString::number(column);
+        if (codepoint < 0) cp = "";
+        m_lbCursorPosition->setText(tr("%1%2 - Line: %3, Col: %4").arg(name).arg(cp).arg(l).arg(c));
         m_lbCursorPosition->show();
     } else {
         m_lbCursorPosition->clear();
@@ -4552,8 +5244,7 @@ bool MainWindow::MendHTML()
 void MainWindow::ClearIgnoredWords()
 {
     QApplication::setOverrideCursor(Qt::WaitCursor);
-    SpellCheck *sc = SpellCheck::instance();
-    sc->clearIgnoredWords();
+    SpellCheck::instance().clearIgnoredWords();
     // Need to reload any tabs to force spelling to be run again in CodeView
     RefreshSpellingHighlighting();
     QApplication::restoreOverrideCursor();
@@ -4579,7 +5270,7 @@ void MainWindow::UpdateZoomLabel(float new_zoom_factor)
 void MainWindow::CreateSectionBreakOldTab(QString content, HTMLResource *originating_resource)
 {
     if (content.isEmpty()) {
-        QMessageBox::warning(this, tr("Sigil"), tr("File cannot be split at this position."));
+        Utility::warning(this, tr("Sigil"), tr("File cannot be split at this position."));
         return;
     }
 
@@ -4591,14 +5282,14 @@ void MainWindow::CreateSectionBreakOldTab(QString content, HTMLResource *origina
 
     HTMLResource *html_resource = m_Book->CreateSectionBreakOriginalResource(content, originating_resource);
     m_BookBrowser->Refresh();
-    // Open the old shortened content in a new tab preceding the current one.
-    // without grabbing focus
-    OpenResource(html_resource, -1, -1, QString(), QUrl(), true);
-    FlowTab *flow_tab = GetCurrentFlowTab();
 
-    // We will reload the reduced content tab to ensure reflects updated resource.
+    // Open the split off piece of content in a new tab preceding the current one.
+    // * without grabbing focus 
+    OpenResource(html_resource, -1, -1, QString(), QUrl(), true);
+
+    // scroll current tab (bottom of split) to split point which is now top of file
+    FlowTab *flow_tab = GetCurrentFlowTab();
     if (flow_tab) {
-        flow_tab->LoadTabContent();
         flow_tab->ScrollToTop();
     }
 
@@ -4620,19 +5311,19 @@ bool MainWindow::SplitOnSGFSectionMarkers()
     foreach(Resource * resource, html_resources) {
         HTMLResource *html_resource = qobject_cast<HTMLResource *>(resource);
         if (!html_resource) {
-            QMessageBox::warning(this, tr("Sigil"), tr("Cannot split since at least one file is not an HTML file."));
+            Utility::warning(this, tr("Sigil"), tr("Cannot split since at least one file is not an HTML file."));
             return false;
         }
 
         // Check if data is well formed before splitting.
         if (!html_resource->FileIsWellFormed()) {
-            QMessageBox::warning(this, tr("Sigil"), tr("Cannot split: %1 XML is not well formed").arg(html_resource->ShortPathName()));
+            Utility::warning(this, tr("Sigil"), tr("Cannot split: %1 XML is not well formed").arg(html_resource->ShortPathName()));
             return false;
         }
 
         // XXX: This should be using the mime type not the extension.
         if (!TEXT_EXTENSIONS.contains(QFileInfo(html_resource->Filename()).suffix().toLower())) {
-            QMessageBox::warning(this, tr("Sigil"), tr("Cannot split since at least one file may not be an HTML file."));
+            Utility::warning(this, tr("Sigil"), tr("Cannot split since at least one file may not be an HTML file."));
             return false;
         }
 
@@ -4680,8 +5371,10 @@ void MainWindow::ShowPasteClipboardHistoryDialog()
     if (m_LastPasteTarget == NULL) {
         return;
     }
-
-    m_ClipboardHistorySelector->exec();
+    // make it non-modal
+    m_ClipboardHistorySelector->show();
+    m_ClipboardHistorySelector->raise();
+    m_ClipboardHistorySelector->activateWindow();
 }
 
 // Change the selected/highlighted resource to match the current tab
@@ -4709,23 +5402,25 @@ void MainWindow::ReadSettings()
     bool MaximizedState = settings.value("maximized", false).toBool();
     bool FullScreenState = settings.value("fullscreen", false).toBool();
 
-    m_LastWindowSize = settings.value("geometry",QByteArray()).toByteArray();
+    // The positions of all the toolbars and dock widgets.
+    // The dockwidgets  will only "restore" properly if the widget already
+    // has the proper geometry to match what was saved and has been
+    // properly resized (see QTBUG-46620 and QTBUG-16252)
+    // So read in now but delay restore until the first time the widget is made active
+    m_LastState = settings.value("toolbars",QByteArray()).toByteArray();
 
-    // we should probably not restore geometry of a maximized window here
-    // since it would restore the normal geometry
+#if 0
+    // Work around saved state restore bug with Find and Replace
+    m_FRVisible = settings.value("frvisible", false).toBool();
+#endif
 
-    if (!MaximizedState && !FullScreenState) {
-        if (!m_LastWindowSize.isEmpty()) restoreGeometry(m_LastWindowSize);
-    } 
+    QByteArray lastWindowSize = settings.value("geometry", QByteArray()).toByteArray();
+    if (!lastWindowSize.isEmpty()) restoreGeometry(lastWindowSize);
 
     if (MaximizedState) {
-        QRect maxsize = settings.value("max_mw_geometry", QApplication::desktop()->availableGeometry(this)).toRect();
-        setGeometry(maxsize);
-        setWindowState(windowState() | Qt::WindowMaximized);
+        // showMaximized();
     } else if (FullScreenState) {
-        QRect maxsize = settings.value("max_mw_geometry", QApplication::desktop()->screenGeometry(this)).toRect();
-        setGeometry(maxsize);
-        setWindowState(windowState() | Qt::WindowFullScreen);
+        // showFullScreen();
     }
 
     DWINGEO qDebug() << "------";
@@ -4733,17 +5428,6 @@ void MainWindow::ReadSettings()
 
     DWINGEO DebugCurrentWidgetSizes();
 
-    // The positions of all the toolbars and dock widgets
-    // The dockwidgets  will only "restore" properly if the widget already
-    // has the proper geometry to match what was saved and has been
-    // properly resized (see QTBUG-46620 and QTBUG-16252)
-    // So delay restore until the first time the widget is made active
-    m_LastState = settings.value("toolbars",QByteArray()).toByteArray();
-
-#ifdef Q_OS_MAC
-    // Work around saved state restore bug with Find and Replace on macOS
-    m_FRVisible = settings.value("frvisible", false).toBool();
-#endif
 
     // The last folder used for saving and opening files
     m_LastFolderOpen  = settings.value("lastfolderopen", QDir::homePath()).toString();
@@ -4756,86 +5440,61 @@ void MainWindow::ReadSettings()
     settings.endGroup();
     m_ClipboardHistoryLimit = settings.clipboardHistoryLimit();
 
-    // Our default fonts for Preview
-    SettingsStore::PreviewAppearance PVAppearance = settings.previewAppearance();
-    QWebEngineSettings *web_settings = QWebEngineSettings::defaultSettings();
-
-    // Default QWebEngine security settings to help prevent rogue epub3 javascripts
-    // User preferences control if javascript is allowed (on) or not for Preview
-    web_settings->setAttribute(QWebEngineSettings::AutoLoadImages, true);
-    web_settings->setAttribute(QWebEngineSettings::JavascriptEnabled, false);
-    web_settings->setAttribute(QWebEngineSettings::JavascriptCanOpenWindows, false);
-    web_settings->setAttribute(QWebEngineSettings::JavascriptCanAccessClipboard, false);
-    web_settings->setAttribute(QWebEngineSettings::LocalContentCanAccessRemoteUrls, false);
-    web_settings->setAttribute(QWebEngineSettings::LocalContentCanAccessFileUrls, true);
-    web_settings->setAttribute(QWebEngineSettings::PluginsEnabled, false);
-    web_settings->setAttribute(QWebEngineSettings::AutoLoadIconsForPage, false);
-    web_settings->setAttribute(QWebEngineSettings::FocusOnNavigationEnabled, true);
-    web_settings->setAttribute(QWebEngineSettings::AllowRunningInsecureContent, false);
-    web_settings->setAttribute(QWebEngineSettings::XSSAuditingEnabled, true);
-    web_settings->setAttribute(QWebEngineSettings::AllowGeolocationOnInsecureOrigins, false);
-    web_settings->setAttribute(QWebEngineSettings::ScreenCaptureEnabled, false);
-    web_settings->setAttribute(QWebEngineSettings::LocalStorageEnabled, false);
-#if QT_VERSION >= QT_VERSION_CHECK(5, 10, 0)
-    web_settings->setAttribute(QWebEngineSettings::AllowWindowActivationFromJavaScript, false);
-#endif
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 11, 0)
-    web_settings->setUnknownUrlSchemePolicy(QWebEngineSettings::DisallowUnknownUrlSchemes);
-    web_settings->setAttribute(QWebEngineSettings::PlaybackRequiresUserGesture, true);
-    web_settings->setAttribute(QWebEngineSettings::JavascriptCanPaste, false);
-#endif
-
-#if QT_VERSION >= QT_VERSION_CHECK(5, 12, 0)
-    web_settings->setAttribute(QWebEngineSettings::DnsPrefetchEnabled, false);
-#endif
-
-    web_settings->setFontSize(QWebEngineSettings::DefaultFontSize, PVAppearance.font_size);
-    web_settings->setFontFamily(QWebEngineSettings::StandardFont, PVAppearance.font_family_standard);
-    web_settings->setFontFamily(QWebEngineSettings::SerifFont, PVAppearance.font_family_serif);
-    web_settings->setFontFamily(QWebEngineSettings::SansSerifFont, PVAppearance.font_family_sans_serif);
-
-    // Check for existing custom Preview stylesheet in Prefs dir and tell Preview about it
+    // Check for existing custom Preview stylesheets in Prefs dir and tell Preview about them
+    QStringList usercssurls;
     QFileInfo CustomPreviewStylesheetInfo(QDir(Utility::DefinePrefsDir()).filePath(CUSTOM_PREVIEW_STYLE_FILENAME));
-    if (CustomPreviewStylesheetInfo.exists() && 
-        CustomPreviewStylesheetInfo.isFile() && 
+    if (CustomPreviewStylesheetInfo.exists() && CustomPreviewStylesheetInfo.isFile() &&
         CustomPreviewStylesheetInfo.isReadable()) {
-        QString usercssurl = QUrl::fromLocalFile(CustomPreviewStylesheetInfo.absoluteFilePath()).toString();
-        m_PreviewWindow->setUserCSSURL(usercssurl);
+        QString acustom_css = QUrl::fromLocalFile(CustomPreviewStylesheetInfo.absoluteFilePath()).toString();
+        if (acustom_css.startsWith("file:")) acustom_css = "sigil:" + acustom_css.mid(5,-1);
+        usercssurls << acustom_css;
     }
+    QFileInfo CustomPreviewAltStylesheetInfo(QDir(Utility::DefinePrefsDir()).filePath(CUSTOM_PREVIEW_STYLE_ALT_FILENAME));
+    if (CustomPreviewAltStylesheetInfo.exists() && CustomPreviewAltStylesheetInfo.isFile() &&
+        CustomPreviewAltStylesheetInfo.isReadable()) {
+        QString acustom_css = QUrl::fromLocalFile(CustomPreviewAltStylesheetInfo.absoluteFilePath()).toString();
+        if (acustom_css.startsWith("file:")) acustom_css = "sigil:" + acustom_css.mid(5,-1);
+        usercssurls << acustom_css;
+    }
+    m_PreviewWindow->setUserCSSURLs(usercssurls);
 
-    // Determine MathJax location and tell Preview about it
-    // The path to MathJax.js is platform dependent
+    // Determine MathJax location (>= version 3.2.2)  and tell Preview about it
+    // The path to our custom MathJax 3.2.2+ build is platform dependent
     QString mathjaxurl;
+    QString mathjaxscript;
 #ifdef Q_OS_MAC
     // On Mac OS X QCoreApplication::applicationDirPath() points to Sigil.app/Contents/MacOS/ 
     QDir execdir(QCoreApplication::applicationDirPath());
     execdir.cdUp();
-    mathjaxurl = execdir.absolutePath() + "/polyfills/MJ/";
+    mathjaxurl = execdir.absolutePath() + "/polyfills/";
+    mathjaxscript = "custom-mathjax.min.js";
 #elif defined(Q_OS_WIN32)
-    mathjaxurl = QCoreApplication::applicationDirPath() + "/polyfills/MJ/";
+    mathjaxurl = QCoreApplication::applicationDirPath() + "/polyfills/";
+    mathjaxscript = "custom-mathjax.min.js";
 #else
     // all flavours of linux / unix
     // First check if system MathJax was configured to be used at compile time
-    if (!mathjax_dir.isEmpty()) {
-        mathjaxurl = mathjax_dir;
+    if (!mathjax3_dir.isEmpty()) {
+        mathjaxurl = mathjax3_dir;
         if (!mathjaxurl.endsWith('/')) {
             mathjaxurl.append('/');
         }
+        mathjaxscript = "startup.js";
     } else {
         // otherwise user supplied environment variable to 'share/sigil'
         // takes precedence over Sigil's usual share location.
+        mathjaxscript = "custom-mathjax.min.js";
         if (!sigil_extra_root.isEmpty()) {
-            mathjaxurl = sigil_extra_root + "/polyfills/MJ/";
+            mathjaxurl = sigil_extra_root + "/polyfills/";
         } else {
-            mathjaxurl = sigil_share_root + "/polyfills/MJ/";
+            mathjaxurl = sigil_share_root + "/polyfills/";
         }
     }
 #endif
     m_mathjaxfolder = mathjaxurl;
-    mathjaxurl = mathjaxurl + "MathJax.js";
+    mathjaxurl = mathjaxurl + mathjaxscript;
     mathjaxurl = QUrl::fromLocalFile(mathjaxurl).toString();
-    mathjaxurl = mathjaxurl + "?config=local/SIGIL_EBOOK_MML_SVG";
+    if (mathjaxurl.startsWith("file:")) mathjaxurl = "sigil:" + mathjaxurl.mid(5,-1);
     m_PreviewWindow->setMathJaxURL(mathjaxurl);
 }
 
@@ -4844,9 +5503,6 @@ void MainWindow::WriteSettings()
 {
     DWINGEO qDebug() << "------";
     DWINGEO qDebug() << "In WriteSettings";
-
-    // disable recording any last sizes as exiting
-    m_SaveLastEnabled = false;
 
     SettingsStore settings;
     settings.beginGroup(SETTINGS_GROUP);
@@ -4858,7 +5514,7 @@ void MainWindow::WriteSettings()
     settings.setValue("maximized", isMaximized());
     settings.setValue("fullscreen",isFullScreen());
 
-#ifdef Q_OS_MAC
+#if 0
     // work around Find Replace saved state restore bug on macOS
     settings.setValue("frvisible",m_FindReplace->isVisible());
     if (m_FindReplace->isVisible()) {
@@ -4869,18 +5525,8 @@ void MainWindow::WriteSettings()
 
     DBG DebugCurrentWidgetSizes();
 
-    // if currently not maximized and not full screen, just save what we have now
-    if (!isMaximized() && !isFullScreen()) {
-        settings.setValue("geometry", saveGeometry());
-    } else {
-        settings.setValue("geometry", m_LastWindowSize);
-    }
-
-    // in case this is needed for helping to determine when last normal sizes
-    if (isMaximized() || isFullScreen() ) {
-        settings.setValue("max_mw_geometry", geometry());
-    }
-
+    settings.setValue("geometry", saveGeometry());
+    
     // The positions of all the toolbars and dock widgets
     settings.setValue("toolbars", saveState());
 
@@ -4890,7 +5536,7 @@ void MainWindow::WriteSettings()
     settings.setValue("recentfiles", s_RecentFiles);
     settings.setValue("preserveheadingattributes", m_preserveHeadingAttributes);
     settings.setValue("clipboardringhistory", m_ClipboardHistorySelector->GetClipboardHistory(m_ClipboardHistoryLimit));
-    KeyboardShortcutManager::instance()->writeSettings();
+    KeyboardShortcutManager::instance().writeSettings();
     settings.endGroup();
     settings.setClipboardHistoryLimit(m_ClipboardHistoryLimit);
 }
@@ -4905,7 +5551,7 @@ bool MainWindow::MaybeSaveDialogSaysProceed()
 
     if (isWindowModified()) {
         QMessageBox::StandardButton button_pressed;
-        button_pressed = QMessageBox::warning(this,
+        button_pressed = Utility::warning(this,
                                               tr("Sigil"),
                                               tr("The document has been modified.\n"
                                                       "Do you want to save your changes?"),
@@ -4925,7 +5571,7 @@ bool MainWindow::MaybeSaveDialogSaysProceed()
 bool MainWindow::ProceedToOverwrite(const QString& msg, const QString &filename)
 {
     QMessageBox::StandardButton button_pressed;
-    button_pressed = QMessageBox::warning(this,
+    button_pressed = Utility::warning(this,
                                           tr("Sigil"),
                                           msg + "\n" + filename + "\n\n" +
                                           tr("Should Sigil overwrite this file?"),
@@ -4938,6 +5584,15 @@ void MainWindow::SetNewBook(QSharedPointer<Book> new_book)
 {
     m_TabManager->CloseOtherTabs();
     m_TabManager->CloseAllTabs(true);
+#ifndef Q_OS_MAC
+    // close out any open minimized non-modal dialogs that relate to old book
+    if (m_SpellcheckEditor && m_SpellcheckEditor->isVisible()) {
+        m_SpellcheckEditor->ForceClose();
+    }
+    if (m_Reports && m_Reports->isVisible()) {
+        m_Reports->accept();
+    }
+#endif
     m_Book = new_book;
     m_BookBrowser->SetBook(m_Book);
     m_TableOfContents->SetBook(m_Book);
@@ -4945,8 +5600,7 @@ void MainWindow::SetNewBook(QSharedPointer<Book> new_book)
     m_IndexEditor->SetBook(m_Book);
     m_ClipEditor->SetBook(m_Book);
     m_SpellcheckEditor->SetBook(m_Book);
-    SpellCheck *sc = SpellCheck::instance();
-    sc->clearIgnoredWords();
+    SpellCheck::instance().clearIgnoredWords();
     ResetLinkOrStyleBookmark();
     SettingsStore settings;
     settings.setRenameTemplate("");
@@ -4968,6 +5622,15 @@ void MainWindow::ResourcesAddedOrDeletedOrMoved()
     if (flow_tab) {
         flow_tab->LoadTabContent();
     }
+
+    // Update the titlebar
+    QString epubversion = m_Book->GetConstOPF()->GetEpubVersion();
+    if (m_Book->GetFolderKeeper()->EpubInSigilStandardForm()) {
+        setWindowTitle(tr("%1[*] - epub%2 - %3").arg(m_CurrentFileName).arg(epubversion).arg(tr("Sigil [std]")));
+    } else {
+        setWindowTitle(tr("%1[*] - epub%2 - %3").arg(m_CurrentFileName).arg(epubversion).arg(tr("Sigil")));
+    }
+
 }
 
 
@@ -5041,7 +5704,7 @@ void MainWindow::CreateNewBook(const QString version, const QStringList &book_pa
         QString filename = bkpath.split("/").last();
         QString extension = filename.split(".").last();
         QString folder = Utility::startingDir(bkpath);
-        QString mt = MediaTypes::instance()->GetMediaTypeFromExtension(extension);
+        QString mt = MediaTypes::instance().GetMediaTypeFromExtension(extension);
         if (filename.endsWith(".opf")) opfbookpath = bkpath;
         if (filename.endsWith(".ncx")) ncxbookpath = bkpath;
         if (filename.endsWith("marker.xhtml")) textdirs << folder;
@@ -5136,11 +5799,9 @@ bool MainWindow::LoadFile(const QString &fullfilepath, bool is_internal)
             // Get any warnings - if our main window is not currently visible they will be
             // shown when the window is displayed.
             m_LastOpenFileWarnings.append(importer->GetLoadWarnings());
-
             if (!m_IsInitialLoad) {
                 ShowLastOpenFileWarnings();
             }
-
             if (!is_internal) {
                 // Store the folder the user opened from
                 m_LastFolderOpen = QFileInfo(fullfilepath).absolutePath();
@@ -5156,36 +5817,34 @@ bool MainWindow::LoadFile(const QString &fullfilepath, bool is_internal)
         }
    } catch (FileEncryptedWithDrm&) {
        ShowMessageOnStatusBar();
-       // ImportHTML/ImportEPUB use wait cursor and can throw exceptions caught here
        QApplication::restoreOverrideCursor();
+       CreateNewBook();
        Utility::DisplayStdErrorDialog(
            tr("The creator of this file has encrypted it with DRM. "
               "Sigil cannot open such files."));
    } catch (EPUBLoadParseError& epub_load_error) {
        ShowMessageOnStatusBar();
-       // ImportHTML/ImportEPUB use wait cursor and can throw exceptions caught here
        QApplication::restoreOverrideCursor();
+       CreateNewBook();
        const QString errors = QString(epub_load_error.what());
        Utility::DisplayStdErrorDialog(
            tr("Cannot load EPUB: %1").arg(QDir::toNativeSeparators(fullfilepath)), errors);
    } catch (const std::runtime_error &e) {
        ShowMessageOnStatusBar();
-       // ImportHTML/ImportEPUB use wait cursor and can throw exceptions caught here
        QApplication::restoreOverrideCursor();
+       CreateNewBook();
        Utility::DisplayExceptionErrorDialog(tr("Cannot load file %1: %2")
                                              .arg(QDir::toNativeSeparators(fullfilepath))
                                              .arg(e.what()));
    } catch (QString& err) {
        ShowMessageOnStatusBar();
-       // ImportHTML/ImportEPUB use wait cursor and can throw exceptions caught here
        QApplication::restoreOverrideCursor();
+       CreateNewBook();
        Utility::DisplayStdErrorDialog(err);
-   }
-
+    }
     // If we got to here some sort of error occurred while loading the file
     // and potentially has left the GUI in a nasty state (like on initial startup)
     // Fallback to displaying a new book instead so GUI integrity is maintained.
-    CreateNewBook();
     return false;
 }
 
@@ -5233,17 +5892,18 @@ bool MainWindow::SaveFile(const QString &fullfilepath, bool update_current_filen
         if (ss.cleanOn() & CLEANON_SAVE) {
             if (not_well_formed) {
                 QApplication::restoreOverrideCursor();
-                bool auto_fix = QMessageBox::Yes == QMessageBox::warning(this,
-                                tr("Sigil"),
-                                tr("This EPUB has HTML files that are not well formed and "
-                                   "your current Clean Source preferences are set to automatically mend on Save. "
-                                   "Saving a file that is not well formed will cause it to be automatically "
-                                   "fixed, which very rarely may result in some data loss.\n\n"
-                                   "Do you want to automatically mend the files before saving?"),
-                                QMessageBox::Yes|QMessageBox::No);
+                QMessageBox::StandardButton button_pressed = Utility::warning(this, tr("Sigil"),
+                            tr("This EPUB has HTML files that are not well formed and "
+                               "your current Clean Source preferences are set to mend on Save.\n\n"
+                               "Do you want to automatically mend the files before saving? Or cancel the Save?"),
+                               QMessageBox::Yes|QMessageBox::No|QMessageBox::Cancel);
+                if (button_pressed == QMessageBox::Cancel) {
+                    ShowMessageOnStatusBar(tr("Saving EPUB... cancelled"), 0);
+                    return false;
+                }
                 QApplication::setOverrideCursor(Qt::WaitCursor);
-                if (auto_fix) {
-                    CleanSource::ReformatAll(broken_resources, CleanSource::Mend);
+                if (button_pressed == QMessageBox::Yes) {
+                    CleanSource::ReformatMendAll(broken_resources);
                     not_well_formed = false;
                 }
             }
@@ -5435,7 +6095,14 @@ void MainWindow::UpdateUiWithCurrentFile(const QString &fullfilepath, bool just_
     QString epubversion = m_Book->GetConstOPF()->GetEpubVersion();
 
     // Update the titlebar
-    setWindowTitle(tr("%1[*] - epub%2 - %3").arg(m_CurrentFileName).arg(epubversion).arg(tr("Sigil")));
+    if (m_Book->GetFolderKeeper()->EpubInSigilStandardForm()) {
+        setWindowTitle(tr("%1[*] - epub%2 - %3").arg(m_CurrentFileName).arg(epubversion).arg(tr("Sigil [std]")));
+    } else {
+        setWindowTitle(tr("%1[*] - epub%2 - %3").arg(m_CurrentFileName).arg(epubversion).arg(tr("Sigil")));
+    }
+
+    // disable epub3 tools menu on epub2
+    ui.menuEPUB3Tools->setEnabled(epubversion.startsWith("3"));
 
     if (m_CurrentFilePath.isEmpty()) {
         return;
@@ -5445,7 +6112,9 @@ void MainWindow::UpdateUiWithCurrentFile(const QString &fullfilepath, bool just_
     const QString nativeFilePath = QDir::toNativeSeparators(m_CurrentFilePath);
     s_RecentFiles.removeAll(nativeFilePath);
     s_RecentFiles.prepend(nativeFilePath);
-
+#ifdef Q_OS_MAC  // allow MacOS to build its own recent files menu in dock
+    addFileToRecentDocs(nativeFilePath);
+#endif
     while (s_RecentFiles.size() > MAX_RECENT_FILES) {
         s_RecentFiles.removeLast();
     }
@@ -5501,7 +6170,7 @@ void MainWindow::ApplyHeadingStyleToTab(QAction* act)
     if (name == "actionHeadingNormal") {
         heading_type = "Normal";
     } else {
-        heading_type = name[ name.count() - 1 ];
+        heading_type = name[ name.length() - 1 ];
     }
 
     if (flow_tab) {
@@ -5573,6 +6242,9 @@ void MainWindow::sizeMenuIcons() {
     QList<QToolBar *> all_toolbars = findChildren<QToolBar *>();
     foreach(QToolBar * toolbar, all_toolbars) {
         toolbar->setIconSize(QSize(iconsize,iconsize));
+        // Kvantum themes on Linux will only show QToolBar "handles" when the movable
+        // property is explicitly set to true (even though true is the Qt default).
+        toolbar->setMovable(true);
     }
 }
 
@@ -5611,6 +6283,11 @@ void MainWindow::ExtendUI()
     m_qlactions.append(ui.actionPlugin9);
     m_qlactions.append(ui.actionPlugin10);
 
+    // initialize list of quick launch automation actions
+    m_auactions.append(ui.actionAutomate1);
+    m_auactions.append(ui.actionAutomate2);
+    m_auactions.append(ui.actionAutomate3);
+    
     // initialize the first set of clip actions
     foreach(QAction * clipaction, ui.toolBarClips->actions()) {
         if (!clipaction->isSeparator()) {
@@ -5645,7 +6322,6 @@ void MainWindow::ExtendUI()
         }
     }
 
-    m_FindReplace->ShowHide();
     // We want a nice frame around the tab manager
     QFrame *frame = new QFrame(this);
     QLayout *layout = new QVBoxLayout(frame);
@@ -5657,7 +6333,6 @@ void MainWindow::ExtendUI()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(1);
     frame->setObjectName(FRAME_NAME);
-    //frame->setStyleSheet(TAB_STYLE_SHEET);
     setCentralWidget(frame);
     m_BookBrowser = new BookBrowser(this);
     m_BookBrowser->setObjectName(BOOK_BROWSER_NAME);
@@ -5677,7 +6352,6 @@ void MainWindow::ExtendUI()
 
     m_PreviewWindow = new PreviewWindow(this);
     m_PreviewWindow->setObjectName(PREVIEW_WINDOW_NAME);
-    m_PreviewWindow->setStyleSheet("QDockWidget {border: none;}");
     addDockWidget(Qt::RightDockWidgetArea, m_PreviewWindow);
     // Now that Book View is gone, show Preview by default on new installations
     // tabified with the TOC widget in the RightDockWidgetArea
@@ -5690,15 +6364,20 @@ void MainWindow::ExtendUI()
 
     ui.menuView->addSeparator();
     ui.menuView->addAction(m_BookBrowser->toggleViewAction());
-    m_BookBrowser->toggleViewAction()->setShortcut(QKeySequence(Qt::ALT + Qt::Key_F1));
+    m_BookBrowser->toggleViewAction()->setShortcut(QKeySequence(Qt::ALT | Qt::Key_F1));
     ui.menuView->addAction(m_Clips->toggleViewAction());
     ui.menuView->addAction(m_PreviewWindow->toggleViewAction());
     m_PreviewWindow->toggleViewAction()->setShortcut(QKeySequence(Qt::Key_F10));
     ui.menuView->addAction(m_TableOfContents->toggleViewAction());
-    m_TableOfContents->toggleViewAction()->setShortcut(QKeySequence(Qt::ALT + Qt::Key_F3));
+    m_TableOfContents->toggleViewAction()->setShortcut(QKeySequence(Qt::ALT | Qt::Key_F3));
     ui.menuView->addAction(m_ValidationResultsView->toggleViewAction());
-    m_ValidationResultsView->toggleViewAction()->setShortcut(QKeySequence(Qt::ALT + Qt::Key_F2));
-
+    m_ValidationResultsView->toggleViewAction()->setShortcut(QKeySequence(Qt::ALT | Qt::Key_F2));
+    ui.menuView->addAction(ui.actionFocusBookBrowser);
+    ui.menuView->addAction(ui.actionFocusCodeView);
+    ui.menuView->addAction(ui.actionFocusPreview);
+    ui.menuView->addAction(ui.actionFocusTOC);
+    ui.menuView->addAction(ui.actionFocusClips);
+    
     // Create the view menu to hide and show toolbars.
     ui.menuToolbars->addAction(ui.toolBarNewActions->toggleViewAction());
     ui.menuToolbars->addAction(ui.toolBarFileActions->toggleViewAction());
@@ -5729,7 +6408,17 @@ void MainWindow::ExtendUI()
     ui.toolBarClips->setVisible(false);
     m_lbCursorPosition = new QLabel(QString(""), statusBar());
     statusBar()->addPermanentWidget(m_lbCursorPosition);
-    UpdateCursorPositionLabel(0, 0);
+    UpdateCursorPositionLabel(0, 0, -1);
+    QWidget* spacer1 = new QWidget(this);
+    spacer1->setFixedWidth(2);
+    statusBar()->addPermanentWidget(spacer1);
+    m_lbDropZone = new FileDropZone(statusBar());
+    statusBar()->addPermanentWidget(m_lbDropZone);
+    SettingsStore ss;
+    if (!ss.fileDropZoneEnabled()) m_lbDropZone->hide();
+    QWidget* spacer2 = new QWidget(this);
+    spacer2->setFixedWidth(2);
+    statusBar()->addPermanentWidget(spacer2);
     // Creating the zoom controls in the status bar
     m_slZoomSlider = new QSlider(Qt::Horizontal, statusBar());
     m_slZoomSlider->setTracking(false);
@@ -5748,201 +6437,209 @@ void MainWindow::ExtendUI()
     statusBar()->addPermanentWidget(zoom_out);
     statusBar()->addPermanentWidget(m_slZoomSlider);
     statusBar()->addPermanentWidget(zoom_in);
-    // We override the default color for highlighted text
-    // so we can actually *see* the text that the FindReplace
-    // dialog finds in Book View... sadly, QWebView ignores a custom
-    // palette set on it directly, so we have to do this globally.
-    QPalette palette;
-    palette.setColor(QPalette::Inactive, QPalette::Highlight, Qt::darkGreen);
-    palette.setColor(QPalette::Inactive, QPalette::HighlightedText, Qt::white);
-    qApp->setPalette(palette);
     // Setup userdefined keyboard shortcuts for actions.
-    KeyboardShortcutManager *sm = KeyboardShortcutManager::instance();
     // Note: shortcut action Ids should not be translated.
     // File
-    sm->registerAction(this, ui.actionNew, "MainWindow.NewDefault");
-    sm->registerAction(this, ui.actionNewEpub2, "MainWindow.NewEpub2");
-    sm->registerAction(this, ui.actionNewEpub3, "MainWindow.NewEpub3");
-    sm->registerAction(this, ui.actionNewHTMLFile, "MainWindow.NewHTMLFile");
-    sm->registerAction(this, ui.actionNewCSSFile, "MainWindow.NewCSSFile");
-    sm->registerAction(this, ui.actionNewJSFile, "MainWindow.NewJSFile");
-    sm->registerAction(this, ui.actionNewSVGFile, "MainWindow.NewSVGFile");
-    sm->registerAction(this, ui.actionAddExistingFile, "MainWindow.AddExistingFile");
-    sm->registerAction(this, ui.actionStandardize, "MainWindow.StandardizeEpub");
-    sm->registerAction(this, ui.actionCustomLayout, "MainWindow.CustomLayout");
-    sm->registerAction(this, ui.actionOpen, "MainWindow.Open");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionNew, "MainWindow.NewDefault");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionNewEpub2, "MainWindow.NewEpub2");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionNewEpub3, "MainWindow.NewEpub3");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionNewHTMLFile, "MainWindow.NewHTMLFile");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionNewCSSFile, "MainWindow.NewCSSFile");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionNewJSFile, "MainWindow.NewJSFile");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionNewSVGFile, "MainWindow.NewSVGFile");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAddExistingFile, "MainWindow.AddExistingFile");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionStandardize, "MainWindow.StandardizeEpub");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionStdFileExts, "MainWindow.UseStandardFileExtensions");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionRebaseManifestIDs, "MainWindow.RebaseManifestIDs");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCustomLayout, "MainWindow.CustomLayout");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionOpen, "MainWindow.Open");
 #ifndef Q_OS_MAC
-    sm->registerAction(this, ui.actionClose, "MainWindow.Close");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionClose, "MainWindow.Close");
 #endif
-    sm->registerAction(this, ui.actionSave, "MainWindow.Save");
-    sm->registerAction(this, ui.actionSaveAs, "MainWindow.SaveAs");
-    sm->registerAction(this, ui.actionSaveACopy, "MainWindow.SaveACopy");
-    sm->registerAction(this, ui.actionPrintPreview, "MainWindow.PrintPreview");
-    sm->registerAction(this, ui.actionPrint, "MainWindow.Print");
-    sm->registerAction(this, ui.actionExit, "MainWindow.Exit");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionSave, "MainWindow.Save");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionSaveAs, "MainWindow.SaveAs");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionSaveACopy, "MainWindow.SaveACopy");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPrintPreview, "MainWindow.PrintPreview");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPrint, "MainWindow.Print");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionExit, "MainWindow.Exit");
     // Edit
-    sm->registerAction(this, ui.actionXEditor, "MainWindow.LaunchExternalXEditor");
-    sm->registerAction(this, ui.actionUndo, "MainWindow.Undo");
-    sm->registerAction(this, ui.actionRedo, "MainWindow.Redo");
-    sm->registerAction(this, ui.actionCut, "MainWindow.Cut");
-    sm->registerAction(this, ui.actionCopy, "MainWindow.Copy");
-    sm->registerAction(this, ui.actionPaste, "MainWindow.Paste");
-    sm->registerAction(this, ui.actionPasteClipboardHistory, "MainWindow.PasteClipboardHistory");
-    sm->registerAction(this, ui.actionDeleteLine, "MainWindow.DeleteLine");
-    sm->registerAction(this, ui.actionInsertFile, "MainWindow.InsertFile");
-    sm->registerAction(this, ui.actionInsertSpecialCharacter, "MainWindow.InsertSpecialCharacter");
-    sm->registerAction(this, ui.actionInsertId, "MainWindow.InsertId");
-    sm->registerAction(this, ui.actionInsertHyperlink, "MainWindow.InsertHyperlink");
-    sm->registerAction(this, ui.actionMarkForIndex, "MainWindow.MarkForIndex");
-    sm->registerAction(this, ui.actionSplitSection, "MainWindow.SplitSection");
-    sm->registerAction(this, ui.actionInsertSGFSectionMarker, "MainWindow.InsertSGFSectionMarker");
-    sm->registerAction(this, ui.actionSplitOnSGFSectionMarkers, "MainWindow.SplitOnSGFSectionMarkers");
-    sm->registerAction(this, ui.actionInsertClosingTag, "MainWindow.InsertClosingTag");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionXEditor, "MainWindow.LaunchExternalXEditor");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionUndo, "MainWindow.Undo");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionRedo, "MainWindow.Redo");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCut, "MainWindow.Cut");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCopy, "MainWindow.Copy");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPaste, "MainWindow.Paste");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPasteClipboardHistory, "MainWindow.PasteClipboardHistory");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionInsertId, "MainWindow.InsertId");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionInsertClip, "MainWindow.InsertClip");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionInsertRole, "MainWindow.InsertRole");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionDeleteLine, "MainWindow.DeleteLine");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionInsertFile, "MainWindow.InsertFile");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionInsertSpecialCharacter, "MainWindow.InsertSpecialCharacter");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionInsertHyperlink, "MainWindow.InsertHyperlink");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionMarkForIndex, "MainWindow.MarkForIndex");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionSplitSection, "MainWindow.SplitSection");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionInsertSGFSectionMarker, "MainWindow.InsertSGFSectionMarker");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionSplitOnSGFSectionMarkers, "MainWindow.SplitOnSGFSectionMarkers");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionInsertClosingTag, "MainWindow.InsertClosingTag");
 #ifndef Q_OS_MAC
-    sm->registerAction(this, ui.actionPreferences, "MainWindow.Preferences");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPreferences, "MainWindow.Preferences");
 #endif
     //Search
-    sm->registerAction(this, ui.actionFind, "MainWindow.Find");
-    sm->registerAction(this, ui.actionFindNext, "MainWindow.FindNext");
-    sm->registerAction(this, ui.actionFindPrevious, "MainWindow.FindPrevious");
-    sm->registerAction(this, ui.actionReplaceCurrent, "MainWindow.ReplaceCurrent");
-    sm->registerAction(this, ui.actionReplaceNext, "MainWindow.ReplaceNext");
-    sm->registerAction(this, ui.actionReplacePrevious, "MainWindow.ReplacePrevious");
-    sm->registerAction(this, ui.actionReplaceAll, "MainWindow.ReplaceAll");
-    sm->registerAction(this, ui.actionCount, "MainWindow.Count");
-    sm->registerAction(this, ui.actionMarkSelection, "MainWindow.MarkSelection");
-    sm->registerAction(this, ui.actionFindNextInFile, "MainWindow.FindNextInFile");
-    sm->registerAction(this, ui.actionReplaceNextInFile, "MainWindow.ReplaceNextInFile");
-    sm->registerAction(this, ui.actionReplaceAllInFile, "MainWindow.ReplaceAllInFile");
-    sm->registerAction(this, ui.actionCountInFile, "MainWindow.CountInFile");
-    sm->registerAction(this, ui.actionGoToLine, "MainWindow.GoToLine");
-    sm->registerAction(this, ui.actionBookmarkLocation, "MainWindow.BookmarkLocation");
-    sm->registerAction(this, ui.actionGoToLinkOrStyle, "MainWindow.GoToLinkOrStyle");
-    sm->registerAction(this, ui.actionGoBackFromLinkOrStyle, "MainWindow.GoBackFromLinkOrStyle");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionFind, "MainWindow.Find");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionHideFind, "MainWindow.HideFind");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionFindNext, "MainWindow.FindNext");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionFindPrevious, "MainWindow.FindPrevious");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionReplaceCurrent, "MainWindow.ReplaceCurrent");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionReplaceNext, "MainWindow.ReplaceNext");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionReplacePrevious, "MainWindow.ReplacePrevious");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionReplaceAll, "MainWindow.ReplaceAll");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCount, "MainWindow.Count");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionDryRun, "MainWindow.DryRunReplaceAll");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionFilterReplaceAll, "MainWindow.FilterReplaceAll");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionRestartSearch, "MainWindow.RestartSearch");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionMarkSelection, "MainWindow.MarkSelection");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionFindNextInFile, "MainWindow.FindNextInFile");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionReplaceNextInFile, "MainWindow.ReplaceNextInFile");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionReplaceAllInFile, "MainWindow.ReplaceAllInFile");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCountInFile, "MainWindow.CountInFile");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionGoToLine, "MainWindow.GoToLine");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionBookmarkLocation, "MainWindow.BookmarkLocation");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionGoToLinkOrStyle, "MainWindow.GoToLinkOrStyle");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionGoBackFromLinkOrStyle, "MainWindow.GoBackFromLinkOrStyle");
     // Format
-    sm->registerAction(this, ui.actionBold, "MainWindow.Bold");
-    sm->registerAction(this, ui.actionItalic, "MainWindow.Italic");
-    sm->registerAction(this, ui.actionUnderline, "MainWindow.Underline");
-    sm->registerAction(this, ui.actionStrikethrough, "MainWindow.Strikethrough");
-    sm->registerAction(this, ui.actionSubscript, "MainWindow.Subscript");
-    sm->registerAction(this, ui.actionSuperscript, "MainWindow.Superscript");
-    sm->registerAction(this, ui.actionAlignLeft, "MainWindow.AlignLeft");
-    sm->registerAction(this, ui.actionAlignCenter, "MainWindow.AlignCenter");
-    sm->registerAction(this, ui.actionAlignRight, "MainWindow.AlignRight");
-    sm->registerAction(this, ui.actionAlignJustify, "MainWindow.AlignJustify");
-    sm->registerAction(this, ui.actionInsertNumberedList, "MainWindow.InsertNumberedList");
-    sm->registerAction(this, ui.actionInsertBulletedList, "MainWindow.InsertBulletedList");
-    sm->registerAction(this, ui.actionIncreaseIndent, "MainWindow.IncreaseIndent");
-    sm->registerAction(this, ui.actionDecreaseIndent, "MainWindow.DecreaseIndent");
-    sm->registerAction(this, ui.actionTextDirectionLTR, "MainWindow.TextDirectionLTR");
-    sm->registerAction(this, ui.actionTextDirectionRTL, "MainWindow.TextDirectionRTL");
-    sm->registerAction(this, ui.actionTextDirectionDefault, "MainWindow.TextDirectionDefault");
-    sm->registerAction(this, ui.actionRemoveFormatting, "MainWindow.RemoveFormatting");
-    sm->registerAction(this, ui.actionRemoveTagPair, "MainWindow.RemoveTagPair");
-    sm->registerAction(this, ui.actionHeading1, "MainWindow.Heading1");
-    sm->registerAction(this, ui.actionHeading2, "MainWindow.Heading2");
-    sm->registerAction(this, ui.actionHeading3, "MainWindow.Heading3");
-    sm->registerAction(this, ui.actionHeading4, "MainWindow.Heading4");
-    sm->registerAction(this, ui.actionHeading5, "MainWindow.Heading5");
-    sm->registerAction(this, ui.actionHeading6, "MainWindow.Heading6");
-    sm->registerAction(this, ui.actionHeadingNormal, "MainWindow.HeadingNormal");
-    sm->registerAction(this, ui.actionHeadingPreserveAttributes, "MainWindow.HeadingPreserveAttributes");
-    sm->registerAction(this, ui.actionCasingLowercase, "MainWindow.CasingLowercase");
-    sm->registerAction(this, ui.actionCasingUppercase, "MainWindow.CasingUppercase");
-    sm->registerAction(this, ui.actionCasingTitlecase, "MainWindow.CasingTitlecase");
-    sm->registerAction(this, ui.actionCasingCapitalize, "MainWindow.CasingCapitalize");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionBold, "MainWindow.Bold");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionItalic, "MainWindow.Italic");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionUnderline, "MainWindow.Underline");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionStrikethrough, "MainWindow.Strikethrough");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionSubscript, "MainWindow.Subscript");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionSuperscript, "MainWindow.Superscript");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAlignLeft, "MainWindow.AlignLeft");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAlignCenter, "MainWindow.AlignCenter");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAlignRight, "MainWindow.AlignRight");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAlignJustify, "MainWindow.AlignJustify");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionInsertNumberedList, "MainWindow.InsertNumberedList");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionInsertBulletedList, "MainWindow.InsertBulletedList");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionIncreaseIndent, "MainWindow.IncreaseIndent");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionDecreaseIndent, "MainWindow.DecreaseIndent");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionTextDirectionLTR, "MainWindow.TextDirectionLTR");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionTextDirectionRTL, "MainWindow.TextDirectionRTL");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionTextDirectionDefault, "MainWindow.TextDirectionDefault");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionRemoveFormatting, "MainWindow.RemoveFormatting");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionRemoveTagPair, "MainWindow.RemoveTagPair");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionHeading1, "MainWindow.Heading1");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionHeading2, "MainWindow.Heading2");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionHeading3, "MainWindow.Heading3");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionHeading4, "MainWindow.Heading4");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionHeading5, "MainWindow.Heading5");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionHeading6, "MainWindow.Heading6");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionHeadingNormal, "MainWindow.HeadingNormal");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionHeadingPreserveAttributes, "MainWindow.HeadingPreserveAttributes");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCasingLowercase, "MainWindow.CasingLowercase");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCasingUppercase, "MainWindow.CasingUppercase");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCasingTitlecase, "MainWindow.CasingTitlecase");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCasingCapitalize, "MainWindow.CasingCapitalize");
     // Tools
-    sm->registerAction(this, ui.actionAddCover, "MainWindow.AddCover");
-    sm->registerAction(this, ui.actionMetaEditor, "MainWindow.MetaEditor");
-    sm->registerAction(this, ui.actionEditTOC, "MainWindow.EditTOC");
-    sm->registerAction(this, ui.actionGenerateTOC, "MainWindow.GenerateTOC");
-    sm->registerAction(this, ui.actionCreateHTMLTOC, "MainWindow.CreateHTMLTOC");
-    sm->registerAction(this, ui.actionWellFormedCheckEpub, "MainWindow.WellFormedCheckEpub");
-    sm->registerAction(this, ui.actionValidateStylesheetsWithW3C, "MainWindow.ValidateStylesheetsWithW3C");
-    sm->registerAction(this, ui.actionAutoSpellCheck, "MainWindow.AutoSpellCheck");
-    sm->registerAction(this, ui.actionMendPrettifyHTML, "MainWindow.MendPrettifyHTML");
-    sm->registerAction(this, ui.actionMendHTML, "MainWindow.MendHTML");
-    sm->registerAction(this, ui.actionUpdateManifestProperties, "MainWindow.UpdateManifestProperties");
-    sm->registerAction(this, ui.actionNCXGuideFromNav, "MainWindow.NCXGuideFromNav");
-    sm->registerAction(this, ui.actionRemoveNCXGuide, "MainWindow.RemoveNCXGuide");
-    sm->registerAction(this, ui.actionSpellcheckEditor, "MainWindow.SpellcheckEditor");
-    sm->registerAction(this, ui.actionSpellcheck, "MainWindow.Spellcheck");
-    sm->registerAction(this, ui.actionAddMisspelledWord, "MainWindow.AddMispelledWord");
-    sm->registerAction(this, ui.actionIgnoreMisspelledWord, "MainWindow.IgnoreMispelledWord");
-    sm->registerAction(this, ui.actionClearIgnoredWords, "MainWindow.ClearIgnoredWords");
-    sm->registerAction(this, ui.actionReports, "MainWindow.Reports");
-    sm->registerAction(this, ui.actionSearchEditor, "MainWindow.SearchEditor");
-    sm->registerAction(this, ui.actionClipEditor, "MainWindow.ClipEditor");
-    sm->registerAction(this, ui.actionAddToIndex, "MainWindow.AddToIndex");
-    sm->registerAction(this, ui.actionMarkForIndex, "MainWindow.MarkForIndex");
-    sm->registerAction(this, ui.actionCreateIndex, "MainWindow.CreateIndex");
-    sm->registerAction(this, ui.actionDeleteUnusedMedia, "MainWindow.DeleteUnusedMedia");
-    sm->registerAction(this, ui.actionDeleteUnusedStyles, "MainWindow.DeleteUnusedStyles");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAddCover, "MainWindow.AddCover");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionMetaEditor, "MainWindow.MetaEditor");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionEditTOC, "MainWindow.EditTOC");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionGenerateTOC, "MainWindow.GenerateTOC");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCreateHTMLTOC, "MainWindow.CreateHTMLTOC");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionWellFormedCheckEpub, "MainWindow.WellFormedCheckEpub");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionValidateStylesheetsWithW3C, "MainWindow.ValidateStylesheetsWithW3C");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAutoSpellCheck, "MainWindow.AutoSpellCheck");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionMendPrettifyHTML, "MainWindow.MendPrettifyHTML");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionMendHTML, "MainWindow.MendHTML");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionUpdateManifestMediaTypes, "MainWindow.UpdateManifestMediaTypes");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionUpdateManifestProperties, "MainWindow.UpdateManifestProperties");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionNCXGuideFromNav, "MainWindow.NCXGuideFromNav");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionRemoveNCXGuide, "MainWindow.RemoveNCXGuide");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionRemoveNavFromSpine, "MainWindow.RemoveNavFromGuide");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAddNavToSpine, "MainWindow.AddNavToSpine");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAddNavToSpineNonLinear, "MainWindow.AddNavToSpineNonLinear");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionSpellcheckEditor, "MainWindow.SpellcheckEditor");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionSpellcheck, "MainWindow.Spellcheck");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAddMisspelledWord, "MainWindow.AddMispelledWord");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionIgnoreMisspelledWord, "MainWindow.IgnoreMispelledWord");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionClearIgnoredWords, "MainWindow.ClearIgnoredWords");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionReports, "MainWindow.Reports");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionSearchEditor, "MainWindow.SearchEditor");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionClipEditor, "MainWindow.ClipEditor");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAddToIndex, "MainWindow.AddToIndex");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionMarkForIndex, "MainWindow.MarkForIndex");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCreateIndex, "MainWindow.CreateIndex");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionDeleteUnusedMedia, "MainWindow.DeleteUnusedMedia");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionDeleteUnusedStyles, "MainWindow.DeleteUnusedStyles");
     // View
-    sm->registerAction(this, ui.actionZoomIn, "MainWindow.ZoomIn");
-    sm->registerAction(this, ui.actionZoomOut, "MainWindow.ZoomOut");
-    sm->registerAction(this, ui.actionZoomReset, "MainWindow.ZoomReset");
-    sm->registerAction(this, m_BookBrowser->toggleViewAction(), "MainWindow.BookBrowser");
-    sm->registerAction(this, m_ValidationResultsView->toggleViewAction(), "MainWindow.ValidationResults");
-    sm->registerAction(this, m_TableOfContents->toggleViewAction(), "MainWindow.TableOfContents");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionZoomIn, "MainWindow.ZoomIn");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionZoomOut, "MainWindow.ZoomOut");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionZoomReset, "MainWindow.ZoomReset");
+    KeyboardShortcutManager::instance().registerAction(this, m_BookBrowser->toggleViewAction(), "MainWindow.BookBrowser");
+    KeyboardShortcutManager::instance().registerAction(this, m_Clips->toggleViewAction(), "MainWindow.ClipsWindow");
+    KeyboardShortcutManager::instance().registerAction(this, m_PreviewWindow->toggleViewAction(), "MainWindow.PreviewWindow");
+    KeyboardShortcutManager::instance().registerAction(this, m_TableOfContents->toggleViewAction(), "MainWindow.TableOfContents");
+    KeyboardShortcutManager::instance().registerAction(this, m_ValidationResultsView->toggleViewAction(), "MainWindow.ValidationResults");
     // Window
-    sm->registerAction(this, ui.actionNextTab, "MainWindow.NextTab");
-    sm->registerAction(this, ui.actionPreviousTab, "MainWindow.PreviousTab");
-    sm->registerAction(this, ui.actionCloseTab, "MainWindow.CloseTab");
-    sm->registerAction(this, ui.actionCloseOtherTabs, "MainWindow.CloseOtherTabs");
-    sm->registerAction(this, ui.actionPreviousResource, "MainWindow.PreviousResource");
-    sm->registerAction(this, ui.actionNextResource, "MainWindow.NextResource");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionNextTab, "MainWindow.NextTab");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPreviousTab, "MainWindow.PreviousTab");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCloseTab, "MainWindow.CloseTab");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCloseOtherTabs, "MainWindow.CloseOtherTabs");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPreviousResource, "MainWindow.PreviousResource");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionNextResource, "MainWindow.NextResource");
     // Checkpoints
-    sm->registerAction(this, ui.actionCommit,     "MainWindow.CreateCheckpoint");
-    sm->registerAction(this, ui.actionCheckout,   "MainWindow.RestoreFromCheckpoint");
-    sm->registerAction(this, ui.actionDiff,       "MainWindow.CompareToCheckpoint");
-    sm->registerAction(this, ui.actionManageRepo, "MainWindow.ManageCheckpointRepository");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCommit,             "MainWindow.CreateCheckpoint");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionCheckout,           "MainWindow.RestoreFromCheckpoint");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionDiff,               "MainWindow.CompareToCheckpoint");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionManageRepo,         "MainWindow.ManageCheckpointRepository");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionEditCheckpointDesc, "MainWindow.EditCheckpointDescription");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionLog,                "MainWindow.ShowCheckpointLog");
     // Automation Lists
-    sm->registerAction(this, ui.actionAutomate1,   "MainWindow.RunAutomate1");
-    sm->registerAction(this, ui.actionAutomate2,   "MainWindow.RunAutomate2");
-    sm->registerAction(this, ui.actionAutomate3,   "MainWindow.RunAutomate3");
-    sm->registerAction(this, ui.actionAutomate1Editor,   "MainWindow.EditAutomate1");
-    sm->registerAction(this, ui.actionAutomate2Editor,   "MainWindow.EditAutomate2");
-    sm->registerAction(this, ui.actionAutomate3Editor,   "MainWindow.EditAutomate3");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAutomate1,   "MainWindow.RunAutomate1");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAutomate2,   "MainWindow.RunAutomate2");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAutomate3,   "MainWindow.RunAutomate3");
     // Help
-    sm->registerAction(this, ui.actionUserGuide, "MainWindow.UserGuide");
-    sm->registerAction(this, ui.actionFAQ, "MainWindow.FAQ");
-    sm->registerAction(this, ui.actionTutorials, "MainWindow.FAQ");
-    sm->registerAction(this, ui.actionDonate, "MainWindow.Donate");
-    sm->registerAction(this, ui.actionSigilWebsite, "MainWindow.SigilWebsite");
-    sm->registerAction(this, ui.actionAbout, "MainWindow.About");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionUserGuide, "MainWindow.UserGuide");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionFAQ, "MainWindow.FAQ");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionTutorials, "MainWindow.FAQ");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionDonate, "MainWindow.Donate");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionSigilWebsite, "MainWindow.SigilWebsite");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionAbout, "MainWindow.About");
 
     // Clips
     foreach(QAction * clipaction, m_clactions) {
         QString clip_number = clipaction->data().toString();
-        sm->registerAction(this, clipaction, "MainWindow.Clip" + clip_number);
+        KeyboardShortcutManager::instance().registerAction(this, clipaction, "MainWindow.Clip" + clip_number);
     }
 
     // for plugins
-    sm->registerAction(this, ui.actionPlugin1,  "MainWindow.Plugins.RunPlugin1");
-    sm->registerAction(this, ui.actionPlugin2,  "MainWindow.Plugins.RunPlugin2");
-    sm->registerAction(this, ui.actionPlugin3,  "MainWindow.Plugins.RunPlugin3");
-    sm->registerAction(this, ui.actionPlugin4,  "MainWindow.Plugins.RunPlugin4");
-    sm->registerAction(this, ui.actionPlugin5,  "MainWindow.Plugins.RunPlugin5");
-    sm->registerAction(this, ui.actionPlugin6,  "MainWindow.Plugins.RunPlugin6");
-    sm->registerAction(this, ui.actionPlugin7,  "MainWindow.Plugins.RunPlugin7");
-    sm->registerAction(this, ui.actionPlugin8,  "MainWindow.Plugins.RunPlugin8");
-    sm->registerAction(this, ui.actionPlugin9,  "MainWindow.Plugins.RunPlugin9");
-    sm->registerAction(this, ui.actionPlugin10, "MainWindow.Plugins.RunPlugin10");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPlugin1,  "MainWindow.Plugins.RunPlugin1");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPlugin2,  "MainWindow.Plugins.RunPlugin2");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPlugin3,  "MainWindow.Plugins.RunPlugin3");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPlugin4,  "MainWindow.Plugins.RunPlugin4");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPlugin5,  "MainWindow.Plugins.RunPlugin5");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPlugin6,  "MainWindow.Plugins.RunPlugin6");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPlugin7,  "MainWindow.Plugins.RunPlugin7");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPlugin8,  "MainWindow.Plugins.RunPlugin8");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPlugin9,  "MainWindow.Plugins.RunPlugin9");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionPlugin10, "MainWindow.Plugins.RunPlugin10");
 
+    // for keyboard focus navigation
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionFocusCodeView,    "MainWindow.FocusOnCodeView");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionFocusBookBrowser, "MainWindow.FocusOnBookBrowser");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionFocusPreview,     "MainWindow.FocusOnPreview");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionFocusTOC,         "MainWindow.FocusOnTOC");
+    KeyboardShortcutManager::instance().registerAction(this, ui.actionFocusClips,       "MainWindow.FocusOnClips");
+    
     // Headings QToolButton
-    ui.tbHeadings->setPopupMode(QToolButton::InstantPopup);
+    ui.tbHeadings->setPopupMode(QToolButton::MenuButtonPopup);
 
     // Change Case QToolButton
-    ui.tbCase->setPopupMode(QToolButton::InstantPopup);
+    ui.tbCase->setPopupMode(QToolButton::MenuButtonPopup);
 
-    // Automate QToolButtons - set to run on click but delay for menu
-    ui.tbAutomate1->setPopupMode(QToolButton::DelayedPopup);
-    ui.tbAutomate2->setPopupMode(QToolButton::DelayedPopup);
-    ui.tbAutomate3->setPopupMode(QToolButton::DelayedPopup);
-    ui.tbAutomate1->setDefaultAction(ui.actionAutomate1);
-    ui.tbAutomate2->setDefaultAction(ui.actionAutomate2);
-    ui.tbAutomate3->setDefaultAction(ui.actionAutomate3);
+    // use this code to disable any QToolButtons with pull down menus
+    // from inadvertantly being on the tab to shift focus chain
+    ui.tbHeadings->setFocusPolicy(Qt::NoFocus);
+    ui.tbCase->setFocusPolicy(Qt::NoFocus);
 
     UpdateClipsUI();
 }
@@ -5952,7 +6649,7 @@ void MainWindow::UpdateClipButton(QAction *ui_action)
     // clipEntry is a simple struct created by GetEntry with new,
     // no reference counting or smart pointers so they must be cleaned up appropriately
     int clip_number = ui_action->data().toInt();
-    ClipEditorModel::clipEntry *clip_entry = ClipEditorModel::instance()->GetEntryFromNumber(clip_number);
+    ClipEditorModel::clipEntry *clip_entry = ClipEditorModel::instance().GetEntryFromNumber(clip_number);
 
     if (clip_entry) {
         ui_action->setText(clip_entry->name);
@@ -5986,46 +6683,6 @@ void MainWindow::LoadInitialFile(const QString &openfilepath, const QString vers
     }
 }
 
-// Workaround for Long term Qt restore geometry bug - see WriteSettings() for details.
-void MainWindow::UpdateLastSizes() {
-    DWINGEO qDebug() << "------";
-    DWINGEO qDebug() << "In UpdateLastSizes";
-    DWINGEO qDebug() << "Pending: " << m_PendingLastSizeUpdate;
-    DWINGEO qDebug() << "Enabled: " << m_SaveLastEnabled;
-
-    if (!m_PendingLastSizeUpdate) return;
-
-    if (m_SaveLastEnabled) {
-        if (!isMaxOrFull()) {
-            DWINGEO qDebug() << "recording last sizes";
-            m_LastWindowSize = saveGeometry();
-        }
-    }
-
-    DWINGEO DebugCurrentWidgetSizes();
-
-    m_PendingLastSizeUpdate = false;
-
-}
-
-// This may still be needed on Windows and Linux
-// so keep the code
-void MainWindow::RestoreLastNormalGeometry()
-{
-    // record the current sizes before changing then as they
-    // are updated in the resize event
-    QByteArray WindowSize = m_LastWindowSize;
-    DWINGEO qDebug() << "------";
-    DWINGEO qDebug() << "In RestoreLastNormalGeometry";
-
-    // prevent any resulting move or resize from being recorded here
-    m_SaveLastEnabled = false;
-    if (!WindowSize.isEmpty()) restoreGeometry(WindowSize);
-    m_SaveLastEnabled=true;
-
-    DWINGEO DebugCurrentWidgetSizes();
-}
-
 void MainWindow::changeEvent(QEvent *e) 
 {
     DWINGEO qDebug() << "------";
@@ -6043,60 +6700,55 @@ void MainWindow::changeEvent(QEvent *e)
             DWINGEO qDebug() << "Main Window new state: maximized";
         } else if (isFullScreen()) {
             DWINGEO qDebug() << "Main Window new state: fullscreen";
-            } else {
+        } else {
             // NORMAL
-                DWINGEO qDebug() << "Main Window new state: normal";
-            // This is still be needed for Windows and Linux to restore after maximize
-                QTimer::singleShot(0, this, SLOT(RestoreLastNormalGeometry()));
+            DWINGEO qDebug() << "Main Window new state: normal";
         }
     }
     if (e->type() == QEvent::ActivationChange) {
         if(isActiveWindow()) {
-            DWINGEO qDebug() << "------";
-            DWINGEO qDebug() << "Main Window is transitioning from inactive to active: " << isMaxOrFull();
+            DWINGEO qDebug() << "Main Window is transitioning from inactive to active: ";
 
             if (m_FirstTime) {
-                if (!m_LastState.isEmpty()) {
-                    restoreState(m_LastState);
-#ifdef Q_OS_MAC
-                    // work around for macOS specific bug saved state restore with Find & Replace
-                    if (m_FRVisible) {
-                         QTimer::singleShot(0, this, SLOT(Find()));
-                    }
-#endif
+                if (!m_LastState.isEmpty()) restoreState(m_LastState);
+
+#if 0
+                if (m_FRVisible) {
+                     QTimer::singleShot(30, this, SLOT(Find()));
                 }
+#endif
 
                 DWINGEO {
-                    int numscreens = qApp->desktop()->numScreens();
+                    QScreen * srn = qApp->primaryScreen();
+                    qDebug() << "Primary Screen: " << srn->name() << srn->manufacturer() << srn->serialNumber();
+                    qDebug() << "    geo        : " << srn->geometry();
+                    qDebug() << "    avail   geo: " << srn->availableGeometry();
+                    qDebug() << "    devideRatio: " << srn->devicePixelRatio();
+                    qDebug() << "    logical dpi: " << srn->logicalDotsPerInchX() << srn->logicalDotsPerInchY();
+                    qDebug() << "    physic  dpi: " << srn->physicalDotsPerInchX() << srn->physicalDotsPerInchY();
+
+                    qDebug() << "\n\nAll Screens";
+                    QList<QScreen*>screenlist = QGuiApplication::screens();
+                    int numscreens = screenlist.count();
                     for (int i = 0; i < numscreens; i++) {
-                        qDebug() << "Screen: " << i;
-                        qDebug() << "    screen  geo: " << qApp->desktop()->screenGeometry(i);
-                        QScreen *srn = QApplication::screens().at(i);
-                        qDebug() << "    avail   geo: " << srn->availableGeometry();
-                        qDebug() << "    geo        : " << srn->geometry();
-                        qDebug() << "    devideRatio: " << srn->devicePixelRatio();
-                        qDebug() << "    logical dpi: " << srn->logicalDotsPerInchX() << srn->logicalDotsPerInchY();
-                        qDebug() << "    physic  dpi: " << srn->physicalDotsPerInchX() << srn->physicalDotsPerInchY();
+                        QScreen *asrn = screenlist.at(i);
+                        qDebug() << "Screen: " << i << asrn->name() << asrn->manufacturer() << asrn->serialNumber();
+                        qDebug() << "    geo        : " << asrn->geometry();
+                        qDebug() << "    avail   geo: " << asrn->availableGeometry();
+                        qDebug() << "    devideRatio: " << asrn->devicePixelRatio();
+                        qDebug() << "    logical dpi: " << asrn->logicalDotsPerInchX() << srn->logicalDotsPerInchY();
+                        qDebug() << "    physic  dpi: " << asrn->physicalDotsPerInchX() << srn->physicalDotsPerInchY();
                     }
                 }
 
-                // restoreState properly handles moving floating Preview Window
-                // back to main screen if needed but keeps it hidden, only need to 
-                // use View to display it, at least on macOSX
-
+            }
+            // moved here from showEvent to make sure it comes after state restoration
+            if (m_FirstTime && !m_LastOpenFileWarnings.isEmpty()) {
+                QTimer::singleShot(0, this, SLOT(ShowLastOpenFileWarnings()));
             }
             m_FirstTime = false;
 
-            // moved here from showEvent to make sure it comes after state restoration
-            if (!m_LastOpenFileWarnings.isEmpty()) {
-                QTimer::singleShot(0, this, SLOT(ShowLastOpenFileWarnings()));
-            }
-
             DBG DebugCurrentWidgetSizes();
-
-            m_SaveLastEnabled = true;
-            m_PendingLastSizeUpdate = true;
-            UpdateLastSizes();
 
         } else {
             DWINGEO qDebug() << "Main Window is transitioning from active to inactive";
@@ -6137,62 +6789,70 @@ void MainWindow::ConnectSignalsToSlots()
     connect(ui.actionExit,          SIGNAL(triggered()), this, SLOT(Exit()));
 
     // Checkpoint Repo functions
-    connect(ui.actionCommit,        SIGNAL(triggered()), this, SLOT(RepoCommit()));
-    connect(ui.actionCheckout,      SIGNAL(triggered()), this, SLOT(RepoCheckout()));
-    connect(ui.actionDiff,          SIGNAL(triggered()), this, SLOT(RepoDiff()));
-    connect(ui.actionManageRepo,    SIGNAL(triggered()), this, SLOT(RepoManage()));
-
-    // Automation
-    connect(ui.actionAutomate1,        SIGNAL(triggered()), this, SLOT(RunAutomate1()));
-    connect(ui.actionAutomate2,        SIGNAL(triggered()), this, SLOT(RunAutomate2()));
-    connect(ui.actionAutomate3,        SIGNAL(triggered()), this, SLOT(RunAutomate3()));
-    connect(ui.actionAutomate1Editor,  SIGNAL(triggered()), this, SLOT(EditAutomate1()));
-    connect(ui.actionAutomate2Editor,  SIGNAL(triggered()), this, SLOT(EditAutomate2()));
-    connect(ui.actionAutomate3Editor,  SIGNAL(triggered()), this, SLOT(EditAutomate3()));
+    connect(ui.actionCommit,              SIGNAL(triggered()), this, SLOT(RepoCommit()));
+    connect(ui.actionCheckout,            SIGNAL(triggered()), this, SLOT(RepoCheckout()));
+    connect(ui.actionDiff,                SIGNAL(triggered()), this, SLOT(RepoDiff()));
+    connect(ui.actionManageRepo,          SIGNAL(triggered()), this, SLOT(RepoManage()));
+    connect(ui.actionEditCheckpointDesc,  SIGNAL(triggered()), this, SLOT(RepoEditTagDescription()));
+    connect(ui.actionLog,                 SIGNAL(triggered()), this, SLOT(RepoShowLog()));
 
     // Edit
     connect(ui.actionXEditor,         SIGNAL(triggered()), this, SLOT(launchExternalXEditor()));
     connect(ui.actionInsertFile,      SIGNAL(triggered()), this, SLOT(InsertFileDialog()));
     connect(ui.actionInsertSpecialCharacter, SIGNAL(triggered()), this, SLOT(InsertSpecialCharacter()));
     connect(ui.actionInsertId,        SIGNAL(triggered()),  this,   SLOT(InsertId()));
+    connect(ui.actionInsertClip,      SIGNAL(triggered()),  this,   SLOT(InsertClip()));
+    connect(ui.actionInsertRole,      SIGNAL(triggered()),  this,   SLOT(InsertRole()));
     connect(ui.actionInsertHyperlink, SIGNAL(triggered()),  this,   SLOT(InsertHyperlink()));
     connect(ui.actionPreferences,     SIGNAL(triggered()), this, SLOT(PreferencesDialog()));
     // Search
-    connect(ui.actionFind,             SIGNAL(triggered()), this, SLOT(Find()));
-    connect(ui.actionFindNext,         SIGNAL(triggered()), m_FindReplace, SLOT(FindNext()));
-    connect(ui.actionFindPrevious,     SIGNAL(triggered()), m_FindReplace, SLOT(FindPrevious()));
-    connect(ui.actionReplaceCurrent,   SIGNAL(triggered()), m_FindReplace, SLOT(ReplaceCurrent()));
-    connect(ui.actionReplaceNext,      SIGNAL(triggered()), m_FindReplace, SLOT(ReplaceNext()));
-    connect(ui.actionReplacePrevious,  SIGNAL(triggered()), m_FindReplace, SLOT(ReplacePrevious()));
-    connect(ui.actionReplaceAll,       SIGNAL(triggered()), m_FindReplace, SLOT(ReplaceAll()));
-    connect(ui.actionCount,            SIGNAL(triggered()), m_FindReplace, SLOT(Count()));
-    connect(ui.actionFindNextInFile,   SIGNAL(triggered()), m_FindReplace, SLOT(FindNextInFile()));
+    connect(ui.actionFind,              SIGNAL(triggered()), this, SLOT(Find()));
+    connect(ui.actionHideFind,          SIGNAL(triggered()), m_FindReplace, SLOT(HideFindReplace()));
+    connect(ui.actionFindNext,          SIGNAL(triggered()), m_FindReplace, SLOT(DoFindNext()));
+    connect(ui.actionFindPrevious,      SIGNAL(triggered()), m_FindReplace, SLOT(DoFindPrevious()));
+    connect(ui.actionReplaceNext,       SIGNAL(triggered()), m_FindReplace, SLOT(DoReplaceNext()));
+    connect(ui.actionReplacePrevious,   SIGNAL(triggered()), m_FindReplace, SLOT(DoReplacePrevious()));
+    connect(ui.actionReplaceCurrent,    SIGNAL(triggered()), m_FindReplace, SLOT(ReplaceCurrent()));
+    connect(ui.actionReplaceAll,        SIGNAL(triggered()), m_FindReplace, SLOT(ReplaceAll()));
+    connect(ui.actionCount,             SIGNAL(triggered()), m_FindReplace, SLOT(Count()));
+    connect(ui.actionDryRun,            SIGNAL(triggered()), m_FindReplace, SLOT(PerformDryRunReplace()));
+    connect(ui.actionFilterReplaceAll,  SIGNAL(triggered()), m_FindReplace, SLOT(ChooseReplacements()));
+    connect(ui.actionRestartSearch,     SIGNAL(triggered()), m_FindReplace, SLOT(DoRestart()));
+    connect(ui.actionFindNextInFile,    SIGNAL(triggered()), m_FindReplace, SLOT(FindNextInFile()));
     connect(ui.actionReplaceNextInFile, SIGNAL(triggered()), m_FindReplace, SLOT(ReplaceNextInFile()));
-    connect(ui.actionReplaceAllInFile, SIGNAL(triggered()), m_FindReplace, SLOT(ReplaceAllInFile()));
+    connect(ui.actionReplaceAllInFile,  SIGNAL(triggered()), m_FindReplace, SLOT(ReplaceAllInFile()));
+    connect(ui.actionCountInFile,       SIGNAL(triggered()), m_FindReplace, SLOT(CountInFile()));
+
     connect(ui.actionMarkSelection,    SIGNAL(triggered()), this, SLOT(MarkSelection()));
-    connect(ui.actionCountInFile,      SIGNAL(triggered()), m_FindReplace, SLOT(CountInFile()));
     connect(ui.actionGoToLine,         SIGNAL(triggered()), this, SLOT(GoToLine()));
+
     // About
     connect(ui.actionUserGuide,     SIGNAL(triggered()), this, SLOT(UserGuide()));
     connect(ui.actionDonate,        SIGNAL(triggered()), this, SLOT(Donate()));
     connect(ui.actionSigilWebsite,  SIGNAL(triggered()), this, SLOT(SigilWebsite()));
     connect(ui.actionAbout,         SIGNAL(triggered()), this, SLOT(AboutDialog()));
     // Tools
-    connect(ui.actionStandardize,   SIGNAL(triggered()), this, SLOT(StandardizeEpub()));
-    connect(ui.actionCustomLayout,  SIGNAL(triggered()), this, SLOT(CreateEpubLayout()));
-    connect(ui.actionAddCover,      SIGNAL(triggered()), this, SLOT(AddCover()));
-    connect(ui.actionMetaEditor,    SIGNAL(triggered()), this, SLOT(MetaEditorDialog()));
-    connect(ui.actionWellFormedCheckEpub,  SIGNAL(triggered()), this, SLOT(WellFormedCheckEpub()));
-    connect(ui.actionValidateStylesheetsWithW3C,  SIGNAL(triggered()), this, SLOT(ValidateStylesheetsWithW3C()));
-    connect(ui.actionSpellcheckEditor,   SIGNAL(triggered()), this, SLOT(SpellcheckEditorDialog()));
-    connect(ui.actionAutoSpellCheck, SIGNAL(triggered(bool)), this, SLOT(SetAutoSpellCheck(bool)));
-    connect(ui.actionSpellcheck,    SIGNAL(triggered()), m_FindReplace, SLOT(FindMisspelledWord()));
-    connect(ui.actionMendPrettifyHTML,    SIGNAL(triggered()), this, SLOT(MendPrettifyHTML()));
-    connect(ui.actionMendHTML,      SIGNAL(triggered()), this, SLOT(MendHTML()));
-    connect(ui.actionUpdateManifestProperties,      SIGNAL(triggered()), this, SLOT(UpdateManifestProperties()));
-    connect(ui.actionNCXGuideFromNav, SIGNAL(triggered()), this, SLOT(GenerateNCXGuideFromNav()));
-    connect(ui.actionRemoveNCXGuide,  SIGNAL(triggered()), this, SLOT(RemoveNCXGuideFromEpub3()));
-    connect(ui.actionClearIgnoredWords, SIGNAL(triggered()), this, SLOT(ClearIgnoredWords()));
+    connect(ui.actionStandardize,                SIGNAL(triggered()), this, SLOT(StandardizeEpub()));
+    connect(ui.actionStdFileExts,                SIGNAL(triggered()), this, SLOT(UseStandardFileExtensions()));
+    connect(ui.actionRebaseManifestIDs,          SIGNAL(triggered()), this, SLOT(RebaseManifestIDs()));
+    connect(ui.actionUpdateManifestMediaTypes,   SIGNAL(triggered()), this, SLOT(UpdateManifestMediaTypes()));
+    connect(ui.actionCustomLayout,               SIGNAL(triggered()), this, SLOT(CreateEpubLayout()));
+    connect(ui.actionAddCover,                   SIGNAL(triggered()), this, SLOT(AddCover()));
+    connect(ui.actionMetaEditor,                 SIGNAL(triggered()), this, SLOT(MetaEditorDialog()));
+    connect(ui.actionWellFormedCheckEpub,        SIGNAL(triggered()), this, SLOT(WellFormedCheckEpub()));
+    connect(ui.actionValidateStylesheetsWithW3C, SIGNAL(triggered()), this, SLOT(ValidateStylesheetsWithW3C()));
+    connect(ui.actionSpellcheckEditor,           SIGNAL(triggered()), this, SLOT(SpellcheckEditorDialog()));
+    connect(ui.actionAutoSpellCheck,             SIGNAL(triggered(bool)), this, SLOT(SetAutoSpellCheck(bool)));
+    connect(ui.actionSpellcheck,                 SIGNAL(triggered()), m_FindReplace, SLOT(FindMisspelledWord()));
+    connect(ui.actionMendPrettifyHTML,           SIGNAL(triggered()),     this, SLOT(MendPrettifyHTML()));
+    connect(ui.actionMendHTML,                   SIGNAL(triggered()),     this, SLOT(MendHTML()));
+    connect(ui.actionUpdateManifestProperties,   SIGNAL(triggered()),     this, SLOT(UpdateManifestProperties()));
+    connect(ui.actionNCXGuideFromNav,            SIGNAL(triggered()),     this, SLOT(GenerateNCXGuideFromNav()));
+    connect(ui.actionRemoveNCXGuide,             SIGNAL(triggered()),     this, SLOT(RemoveNCXGuideFromEpub3()));
+    connect(ui.actionRemoveNavFromSpine,         SIGNAL(triggered()),     this, SLOT(RemoveNavFromSpine()));
+    connect(ui.actionAddNavToSpine,              SIGNAL(triggered()),     this, SLOT(AddNavToSpine()));
+    connect(ui.actionAddNavToSpineNonLinear,     SIGNAL(triggered()),     this, SLOT(AddNavToSpineNonLinear()));
+    connect(ui.actionClearIgnoredWords,          SIGNAL(triggered()),     this, SLOT(ClearIgnoredWords()));
     connect(ui.actionGenerateTOC,   SIGNAL(triggered()), this, SLOT(GenerateTOC()));
     connect(ui.actionEditTOC,       SIGNAL(triggered()), this, SLOT(EditTOCDialog()));
     connect(ui.actionCreateHTMLTOC, SIGNAL(triggered()), this, SLOT(CreateHTMLTOC()));
@@ -6205,12 +6865,14 @@ void MainWindow::ConnectSignalsToSlots()
     connect(ui.actionDeleteUnusedMedia,    SIGNAL(triggered()), this, SLOT(DeleteUnusedMedia()));
     connect(ui.actionDeleteUnusedStyles,    SIGNAL(triggered()), this, SLOT(DeleteUnusedStyles()));
     // Change case
+    connect(ui.tbCase, &QToolButton::triggered, ui.tbCase, &QToolButton::setDefaultAction);
     connect(m_casingChangeGroup,    SIGNAL(triggered(QAction*)), this, SLOT(ChangeCasing(QAction*)));
     // View
     connect(ui.actionZoomIn,        SIGNAL(triggered()), this, SLOT(ZoomIn()));
     connect(ui.actionZoomOut,       SIGNAL(triggered()), this, SLOT(ZoomOut()));
     connect(ui.actionZoomReset,     SIGNAL(triggered()), this, SLOT(ZoomReset()));
     connect(ui.actionHeadingPreserveAttributes, SIGNAL(triggered(bool)), this, SLOT(SetPreserveHeadingAttributes(bool)));
+    connect(ui.tbHeadings, &QToolButton::triggered, ui.tbHeadings, &QToolButton::setDefaultAction);
     connect(m_headingActionGroup,   SIGNAL(triggered(QAction*)), this, SLOT(ApplyHeadingStyleToTab(QAction*)));
     // Window
     connect(ui.actionNextTab,       SIGNAL(triggered()), m_TabManager, SLOT(NextTab()));
@@ -6223,6 +6885,12 @@ void MainWindow::ConnectSignalsToSlots()
     connect(ui.actionGoBackFromLinkOrStyle,  SIGNAL(triggered()), this,   SLOT(GoBackFromLinkOrStyle()));
     connect(ui.actionSplitOnSGFSectionMarkers, SIGNAL(triggered()),  this,   SLOT(SplitOnSGFSectionMarkers()));
     connect(ui.actionPasteClipboardHistory,    SIGNAL(triggered()),  this,   SLOT(ShowPasteClipboardHistoryDialog()));
+    // Keyboard Focus Navigation
+    connect(ui.actionFocusCodeView,    SIGNAL(triggered()), this, SLOT(FocusOnCodeView()));
+    connect(ui.actionFocusBookBrowser, SIGNAL(triggered()), this, SLOT(FocusOnBookBrowser()));
+    connect(ui.actionFocusPreview,     SIGNAL(triggered()), this, SLOT(FocusOnPreview()));
+    connect(ui.actionFocusTOC,         SIGNAL(triggered()), this, SLOT(FocusOnTOC()));
+    connect(ui.actionFocusClips,       SIGNAL(triggered()), this, SLOT(FocusOnClips()));
 
     // Clips
     foreach(QAction* clipaction, m_clactions) {
@@ -6234,7 +6902,9 @@ void MainWindow::ConnectSignalsToSlots()
                 MainWindow::PasteClipIntoCurrentTarget(i);
         });
     }
-
+    // Drop zone
+    connect(m_lbDropZone, SIGNAL(AddDroppedToEpub(const QStringList&)), this, SLOT(AddDroppedFiles(const QStringList&)));
+    
     // Slider
     connect(m_slZoomSlider,         SIGNAL(valueChanged(int)), this, SLOT(SliderZoom(int)));
     // We also update the label when the slider moves... this is to show
@@ -6263,16 +6933,20 @@ void MainWindow::ConnectSignalsToSlots()
     connect(m_BookBrowser, SIGNAL(LinkJavascriptsToResourcesRequest(QList<Resource *>)), this, SLOT(LinkJavascriptsToResources(QList<Resource *>)));
     connect(m_BookBrowser, SIGNAL(RemoveResourcesRequest()), this, SLOT(RemoveResources()));
     connect(m_BookBrowser, SIGNAL(OpenFileRequest(QString, int, int)), this, SLOT(OpenFile(QString, int, int)));
+    connect(m_BookBrowser, SIGNAL(ViewImageRequest(const QUrl&)), this, SLOT(ViewImageDialog(const QUrl&)));
     connect(m_TableOfContents, SIGNAL(OpenResourceRequest(Resource *, int, int, const QString &, const QUrl &)),
             this,     SLOT(OpenResource(Resource *, int, int, const QString &, const QUrl &)));
     connect(m_ValidationResultsView, SIGNAL(OpenResourceRequest(Resource *, int, int, const QString &)),
             this,     SLOT(OpenResource(Resource *, int, int, const QString &)));
+    connect(m_ValidationResultsView, SIGNAL(ShowMessageRequest(const QString &)),
+            this,     SLOT(ShowMessageOnStatusBar(const QString &)));
     connect(m_TabManager, SIGNAL(OpenUrlRequest(const QUrl &)),
             this, SLOT(OpenUrl(const QUrl &)));
     connect(m_TabManager, SIGNAL(OldTabRequest(QString, HTMLResource *)),
             this,          SLOT(CreateSectionBreakOldTab(QString, HTMLResource *)));
     connect(m_FindReplace, SIGNAL(OpenSearchEditorRequest(SearchEditorModel::searchEntry *)),
             this,          SLOT(SearchEditorDialog(SearchEditorModel::searchEntry *)));
+    connect(m_FindReplace, SIGNAL(FROpenFileRequest(QString, int, int)), this, SLOT(OpenFile(QString, int, int)));
     connect(m_TabManager, SIGNAL(ShowStatusMessageRequest(const QString &, int)), this, SLOT(ShowMessageOnStatusBar(const QString &, int)));
 
     connect(m_FindReplace, SIGNAL(ShowMessageRequest(const QString &)),
@@ -6287,6 +6961,9 @@ void MainWindow::ConnectSignalsToSlots()
     connect(m_SearchEditor, SIGNAL(ReplaceAllSelectedSearchRequest()), m_FindReplace,   SLOT(ReplaceAllSearch()));
     connect(m_SearchEditor, SIGNAL(LoadSelectedSearchRequest(SearchEditorModel::searchEntry *)),
             m_FindReplace,   SLOT(LoadSearch(SearchEditorModel::searchEntry *)));
+    connect(m_SearchEditor, SIGNAL(RestartSearch()), m_FindReplace, SLOT(DoRestart()));
+    connect(m_SearchEditor, SIGNAL(CountsReportCountRequest(SearchEditorModel::searchEntry*, int&)),
+            m_FindReplace, SLOT(CountsReportCount(SearchEditorModel::searchEntry*, int&)));
 
     connect(m_ClipboardHistorySelector, SIGNAL(PasteRequest(const QString &)), this, SLOT(PasteTextIntoCurrentTarget(const QString &)));
     connect(m_SelectCharacter, SIGNAL(SelectedCharacter(const QString &)), this, SLOT(PasteTextIntoCurrentTarget(const QString &)));
@@ -6315,12 +6992,12 @@ void MainWindow::ConnectSignalsToSlots()
     connect(m_Reports,       SIGNAL(OpenFileRequest(QString, int, int)), this, SLOT(OpenFile(QString, int, int)));
     connect(m_Reports,       SIGNAL(DeleteFilesRequest(QStringList)), this, SLOT(DeleteFilenames(QStringList)));
     connect(m_Reports,       SIGNAL(DeleteStylesRequest(QList<BookReports::StyleData *>)), this, SLOT(DeleteReportsStyles(QList<BookReports::StyleData *>)));
-    connect(m_Reports,       SIGNAL(FindText(QString)), m_FindReplace, SLOT(FindAnyText(QString)));
-    connect(m_Reports,       SIGNAL(FindTextInTags(QString)), m_FindReplace, SLOT(FindAnyTextInTags(QString)));
+    connect(m_Reports,       SIGNAL(RPFindText(QString)), m_FindReplace, SLOT(FindAnyText(QString)));
+    connect(m_Reports,       SIGNAL(RPFindTextInTags(QString)), m_FindReplace, SLOT(FindAnyTextInTags(QString)));
 
     // Plugins
-    PluginDB *pdb = PluginDB::instance();
-    connect(pdb, SIGNAL(plugins_changed()), this, SLOT(loadPluginsMenu()));
+    connect(&PluginDB::instance(), SIGNAL(plugins_changed()), this, SLOT(loadPluginsMenu()));
+
 }
 
 void MainWindow::MakeTabConnections(ContentTab *tab)
@@ -6337,6 +7014,7 @@ void MainWindow::MakeTabConnections(ContentTab *tab)
     if (rType != Resource::ImageResourceType && 
         rType != Resource::AudioResourceType && 
         rType != Resource::VideoResourceType && 
+        rType != Resource::PdfResourceType && 
         rType != Resource::FontResourceType) {
         connect(ui.actionUndo,                     SIGNAL(triggered()),  tab,   SLOT(Undo()));
         connect(ui.actionRedo,                     SIGNAL(triggered()),  tab,   SLOT(Redo()));
@@ -6358,6 +7036,7 @@ void MainWindow::MakeTabConnections(ContentTab *tab)
         connect(tab,   SIGNAL(SelectionChanged()),           this,          SLOT(UpdateUIOnTabChanges()));
     }
 
+
     if (rType == Resource::HTMLResourceType ||
         rType == Resource::ImageResourceType ||
         rType == Resource::SVGResourceType) {
@@ -6366,7 +7045,17 @@ void MainWindow::MakeTabConnections(ContentTab *tab)
     }
 
     if (rType == Resource::CSSResourceType) {
-        connect(tab,   SIGNAL(CSSUpdated()), this, SLOT(UpdatePreviewCSSRequest()));
+        connect(tab,   SIGNAL(TabUpdated()), this, SLOT(UpdatePreviewTabRequest()));
+    }
+
+    if (rType == Resource::ImageResourceType) {
+        connect(tab,   SIGNAL(ImageContentChanged(Resource*)), this, SLOT(HandleImageContentChanged(Resource *)));
+    }
+
+    if (rType == Resource::SVGResourceType) {
+        connect(tab,   SIGNAL(ViewImageRequest(const QUrl &)),
+                this,  SLOT(ViewImageDialog(const QUrl &)));
+        connect(tab,   SIGNAL(TabUpdated()), this, SLOT(UpdatePreviewTabRequest()));
     }
 
     if (rType == Resource::HTMLResourceType ||
@@ -6421,11 +7110,12 @@ void MainWindow::MakeTabConnections(ContentTab *tab)
 
     if (rType != Resource::AudioResourceType && 
         rType != Resource::VideoResourceType &&
+        rType != Resource::PdfResourceType &&
         rType != Resource::FontResourceType) {
         connect(ui.actionPrintPreview,             SIGNAL(triggered()),  tab,   SLOT(PrintPreview()));
         connect(ui.actionPrint,                    SIGNAL(triggered()),  tab,   SLOT(Print()));
-        connect(tab,   SIGNAL(ContentChanged()),             m_Book.data(), SLOT(SetModified()));
-        connect(tab,   SIGNAL(UpdateCursorPosition(int, int)), this,          SLOT(UpdateCursorPositionLabel(int, int)));
+        connect(tab,   SIGNAL(ContentChanged()),                    m_Book.data(), SLOT(SetModified()));
+        connect(tab,   SIGNAL(UpdateCursorPosition(int, int, int)), this, SLOT(UpdateCursorPositionLabel(int, int, int)));
         connect(tab,   SIGNAL(ZoomFactorChanged(float)),   this,          SLOT(UpdateZoomLabel(float)));
         connect(tab,   SIGNAL(ZoomFactorChanged(float)),   this,          SLOT(UpdateZoomSlider(float)));
         connect(tab,   SIGNAL(ShowStatusMessageRequest(const QString &)), this, SLOT(ShowMessageOnStatusBar(const QString &)));
@@ -6497,4 +7187,72 @@ QList<SearchEditorModel::searchEntry*> MainWindow::SearchEditorGetCurrentEntries
 void MainWindow::SearchEditorRecordEntryAsCompleted(SearchEditorModel::searchEntry* entry)
 {
     m_SearchEditor->RecordEntryAsCompleted(entry);
+}
+
+void MainWindow::FocusOnCodeView()
+{
+    if (!m_TabManager) return;
+    FocusOn(m_TabManager);
+    ContentTab * tab = GetCurrentContentTab();
+    if (tab) {
+        tab->raise();
+        tab->setFocus();
+    }
+    ShowMessageOnStatusBar(tr("Focus changed to CodeView window."));
+}
+
+void MainWindow::FocusOnBookBrowser()
+{
+    if (!m_BookBrowser) return;
+    FocusOn(m_BookBrowser);
+    m_BookBrowser->raise();
+    m_BookBrowser->FocusOnBookBrowser();
+    ShowMessageOnStatusBar(tr("Focus changed to BookBrowser window."));
+}
+
+void MainWindow::FocusOnPreview()
+{
+    if (!m_PreviewWindow) return;
+    FocusOn(m_PreviewWindow);
+    m_PreviewWindow->raise();
+    m_PreviewWindow->SetFocusOnPreview();
+    ShowMessageOnStatusBar(tr("Focus changed to Preview window."));
+}
+
+void MainWindow::FocusOnTOC()
+{
+    if (!m_TableOfContents) return;
+    FocusOn(m_TableOfContents);
+    m_TableOfContents->raise();
+    m_TableOfContents->SetFocusOnTOC();
+    ShowMessageOnStatusBar(tr("Focus changed to Table Of Contents window."));
+}
+
+void MainWindow::FocusOnClips()
+{
+    if (!m_Clips) return;
+    FocusOn(m_Clips);
+    m_Clips->raise();
+    m_Clips->SetFocusOnClips();
+    ShowMessageOnStatusBar(tr("Focus changed to Clips window."));
+}
+
+void MainWindow::FocusOn(QWidget* dw)
+{
+    if (dw) {
+        dw->show();
+        dw->activateWindow();
+        dw->setFocus(Qt::ShortcutFocusReason);
+    }
+}
+
+void MainWindow::HandleImageContentChanged(Resource* resource)
+{
+    ImageResource* image_resource =  qobject_cast<ImageResource *>(resource);
+    if (image_resource) {
+        // do the sequence as if file was being watched
+        image_resource->FileChangedOnDisk();
+        m_Book->ResourceUpdatedFromDisk(image_resource);
+        UpdatePreview();
+    }
 }

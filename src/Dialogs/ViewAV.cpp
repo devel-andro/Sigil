@@ -1,6 +1,6 @@
 /************************************************************************
  **
- **  Copyright (C) 2020-2021 Kevin B. Hendricks
+ **  Copyright (C) 2020-2023 Kevin B. Hendricks
  **
  **  This file is part of Sigil.
  **
@@ -27,11 +27,12 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QtWebEngineWidgets/QWebEngineProfile>
-#include <QtWebEngineWidgets/QWebEngineView>
+#include <QtWebEngineWidgets>
+#include <QtWebEngineCore>
+#include <QWebEngineProfile>
+#include <QWebEngineView>
 #include <QGuiApplication>
 #include <QApplication>
-#include "ViewEditors/SimplePage.h"
 #include "Misc/Utility.h"
 #include "Misc/SettingsStore.h"
 #include "MainUI/MainApplication.h"
@@ -46,10 +47,12 @@ ViewAV::ViewAV(QWidget *parent)
       m_bp(new QToolButton(this)),
       m_layout(new QVBoxLayout(this))
 {
+    setAttribute(Qt::WA_DeleteOnClose, true);
     m_layout->addWidget(m_av);
     m_bp->setToolTip(tr("Close this window"));
     m_bp->setText(tr("Done"));
     m_bp->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    m_bp->setFocusPolicy(Qt::TabFocus);
     QHBoxLayout* hl = new QHBoxLayout();
     hl->addStretch(0);
     hl->addWidget(m_bp);
@@ -103,9 +106,7 @@ void ViewAV::WriteSettings()
 
 void ViewAV::ConnectSignalsToSlots()
 {
-#ifdef Q_OS_MAC
     MainApplication *mainApplication = qobject_cast<MainApplication *>(qApp);
     connect(mainApplication, SIGNAL(applicationPaletteChanged()), this, SLOT(ReloadViewer()));
-#endif
     connect(m_bp, SIGNAL(clicked()), this, SLOT(accept()));
 }

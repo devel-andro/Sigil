@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2019-2021 Kevin B. Hendricks Stratford, Ontario, Canada
-**  Copyright (C) 2021 Doug Massay
+**  Copyright (C) 2019-2025 Kevin B. Hendricks Stratford, Ontario, Canada
+**  Copyright (C) 2021-2025 Doug Massay
 **
 **  This file is part of Sigil.
 **
@@ -25,7 +25,9 @@
 
 #include <memory>
 #include <QEvent>
-#include <QtWebEngineWidgets/QWebEngineView>
+#include <QtWebEngineWidgets>
+#include <QtWebEngineCore>
+#include <QWebEngineView>
 #include "ViewEditors/WebEngPage.h"
 #include "ViewEditors/Viewer.h"
 
@@ -42,12 +44,12 @@ public:
      *
      * @param parent The object's parent.
      */
-    ViewPreview(QWidget *parent = 0);
+    ViewPreview(QWidget *parent = 0, bool setbackground = true);
     ~ViewPreview();
 
     QSize sizeHint() const;
 
-    void CustomSetDocument(const QString &path, const QString &html);
+    void CustomSetDocument(const QString &path, const QString &html, bool clear_the_cache = false);
 
     bool IsLoadingFinished();
 
@@ -96,7 +98,7 @@ public:
     void StoreCaretLocationUpdate(const QList<ElementIndex> &hierarchy);
 
     // inherited
-    bool ExecuteCaretUpdate();
+    bool ExecuteCaretUpdate(bool default_to_top=false);
 
     /**
      * Force a caret location update to the specified position.
@@ -112,7 +114,9 @@ public slots:
 
     void ShowOverlay();
     void HideOverlay();
-
+    QString GetHTML() const;
+    void ContinueCustomLoadAfterClear();
+    void ClearWebCache();
 
 signals:
     /**
@@ -240,6 +244,10 @@ private:
     QString m_hoverUrl;
 
     LoadingOverlay* m_overlay;
+
+    QString m_xhtml_to_load;
+    QString m_xhtml_path;
+    bool m_using_cache_clear = false;
 };
 
 #endif // VIEWPREVIEW_H

@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2019 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -41,9 +41,13 @@ TextTab::TextTab(TextResource *resource,
     m_LineToScrollTo(line_to_scroll_to),
     m_PositionToScrollTo(position_to_scroll_to)
 {
+    m_wCodeView->SetContentMediaType(resource->GetMediaType());
+    UpdateCodeViewBookPath();
     m_Layout->addWidget(m_wCodeView);
     setFocusProxy(m_wCodeView);
     ConnectSignalsToSlots();
+    connect(this,  SIGNAL(TabRenamed(ContentTab *)),this, SLOT(UpdateCodeViewBookPath()));
+
     // Make sure the resource is loaded as its file doesn't seem
     // to exist when the resource tries to do an initial load.
     m_TextResource->InitialLoad();
@@ -54,12 +58,17 @@ TextTab::TextTab(TextResource *resource,
 
 TextTab::~TextTab()
 {
+    disconnect(this,  SIGNAL(TabRenamed(ContentTab *)), 0, 0);
     if (m_wCodeView) {
         delete m_wCodeView;
         m_wCodeView = 0;
     }
 }
 
+void TextTab::UpdateCodeViewBookPath()
+{
+    m_wCodeView->SetContentBookPath(m_TextResource->GetRelativePath());
+}
 
 void TextTab::ScrollToLine(int line)
 {
@@ -120,6 +129,11 @@ int TextTab::GetCursorColumn() const
     return m_wCodeView->GetCursorColumn();
 }
 
+int TextTab::GetCursorCodepoint() const
+{
+    return m_wCodeView->GetCursorCodepoint();
+}
+
 
 float TextTab::GetZoomFactor() const
 {
@@ -144,6 +158,16 @@ Searchable *TextTab::GetSearchableContent()
     return m_wCodeView;
 }
 
+bool TextTab::IsLoadingFinished()
+{
+    bool is_finished = false;
+
+    if (m_wCodeView) {
+        is_finished = m_wCodeView->IsLoadingFinished();
+    }
+
+    return is_finished;
+}
 
 void TextTab::Undo()
 {
@@ -211,6 +235,23 @@ void TextTab::ChangeCasing(const Utility::Casing casing)
     }
 }
 
+void TextTab::ThemeChangeRefresh()
+{
+    if (m_wCodeView) {
+        m_wCodeView->SetAppearance();
+        m_wCodeView->RehighlightDocument();
+    }
+}
+
+bool TextTab::PasteClipNumber(int clip_number)
+{
+    return m_wCodeView->PasteClipNumber(clip_number);
+}
+
+bool TextTab::PasteClipEntries(QList<ClipEditorModel::clipEntry *>clips)
+{
+    return m_wCodeView->PasteClipEntries(clips);
+}
 
 void TextTab::SaveTabContent()
 {
@@ -268,7 +309,7 @@ void TextTab::LoadTabContent(QWidget *editor)
 
 void TextTab::EmitUpdateCursorPosition()
 {
-    emit UpdateCursorPosition(GetCursorLine(), GetCursorColumn());
+  emit UpdateCursorPosition(GetCursorLine(), GetCursorColumn(), GetCursorCodepoint());
 }
 
 void TextTab::DelayedInitialization()

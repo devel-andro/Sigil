@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford Ontario Canada
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford Ontario Canada
 **  Copyright (C) 2009-2011 Strahinja Markovic  <strahinja.markovic@gmail.com>
 **
 **  This file is part of Sigil.
@@ -20,6 +20,7 @@
 **
 *************************************************************************/
 
+#include "EmbedPython/PyObjectPtr.h"
 #include <signal.h>
 
 #include <QtCore/QtCore>
@@ -35,6 +36,7 @@
 #include "ResourceObjects/HTMLResource.h"
 #include "ResourceObjects/TextResource.h"
 #include "ViewEditors/Searchable.h"
+#include "EmbedPython/PythonRoutines.h"
 #include "sigil_constants.h"
 
 int SearchOperations::CountInFiles(const QString &search_regex,
@@ -79,7 +81,7 @@ int SearchOperations::CountInFile(const QString &search_regex,
                                   Resource *resource,
                                   bool check_spelling)
 {
-    QReadLocker locker(&resource->GetLock());
+    // QReadLocker locker(&resource->GetLock());
     HTMLResource *html_resource = qobject_cast<HTMLResource *>(resource);
 
     if (html_resource) {
@@ -102,19 +104,24 @@ int SearchOperations::CountInHTMLFile(const QString &search_regex,
                                       HTMLResource *html_resource,
                                       bool check_spelling)
 {
-    const QString &text = html_resource->GetText();
-
+    QReadLocker locker(&html_resource->GetLock());
+    // note you can not use a reference here because the text returned from
+    // any text resource can come from an internal cache that can go away
+    const QString text = html_resource->GetText();
     if (check_spelling) {
-        return HTMLSpellCheck::CountMisspelledWords(text, 0, text.count(), search_regex);
+        return HTMLSpellCheck::CountMisspelledWords(text, 0, text.length(), search_regex);
     } else {
-        return PCRECache::instance()->getObject(search_regex)->getEveryMatchInfo(text).count();
+        return PCRECache::instance().getObject(search_regex)->getEveryMatchInfo(text).count();
     }
 }
 
 int SearchOperations::CountInTextFile(const QString &search_regex, TextResource *text_resource)
 {
-    const QString &text = text_resource->GetText();
-    return PCRECache::instance()->getObject(search_regex)->getEveryMatchInfo(text).count();
+    QReadLocker locker(&text_resource->GetLock());
+    // note you can not use a reference here because the text returned from
+    // any text resource can come from an internal cache that can go away
+    const QString text = text_resource->GetText();
+    return PCRECache::instance().getObject(search_regex)->getEveryMatchInfo(text).count();
 }
 
 
@@ -122,7 +129,7 @@ int SearchOperations::ReplaceInFile(const QString &search_regex,
                                     const QString &replacement,
                                     Resource *resource)
 {
-    QWriteLocker locker(&resource->GetLock());
+    // QWriteLocker locker(&resource->GetLock());
     HTMLResource *html_resource = qobject_cast<HTMLResource *>(resource);
 
     if (html_resource) {
@@ -145,12 +152,14 @@ int SearchOperations::ReplaceHTMLInFile(const QString &search_regex,
                                         HTMLResource *html_resource)
 {
     // SettingsStore ss;
-
+    QWriteLocker locker(&html_resource->GetLock());
     int count;
     QString new_text;
     QString text = html_resource->GetText();
     std::tie(new_text, count) = PerformGlobalReplace(text, search_regex, replacement);
-    html_resource->SetText(new_text);
+    if (new_text != text) {
+        html_resource->SetText(new_text);
+    }
     return count;
  }
 
@@ -159,11 +168,14 @@ int SearchOperations::ReplaceTextInFile(const QString &search_regex,
                                         const QString &replacement,
                                         TextResource *text_resource)
 {
+    QWriteLocker locker(&text_resource->GetLock());
     int count;
     QString new_text;
     QString text = text_resource->GetText();
     std::tie(new_text, count) = PerformGlobalReplace(text, search_regex, replacement);
-    text_resource->SetText(new_text);
+    if (new_text != text) {
+        text_resource->SetText(new_text);
+    }
     return count;
 }
 
@@ -174,7 +186,7 @@ std::tuple<QString, int> SearchOperations::PerformGlobalReplace(const QString &t
 {
     QString new_text = text;
     int count = 0;
-    SPCRE *spcre = PCRECache::instance()->getObject(search_regex);
+    SPCRE *spcre = PCRECache::instance().getObject(search_regex);
     QList<SPCRE::MatchInfo> match_info = spcre->getEveryMatchInfo(text);
 
     for (int i =  match_info.count() - 1; i >= 0; i--) {
@@ -198,8 +210,8 @@ std::tuple<QString, int> SearchOperations::PerformHTMLSpellCheckReplace(const QS
     QString new_text = text;
     int count = 0;
     int offset = 0;
-    SPCRE *spcre = PCRECache::instance()->getObject(search_regex);
-    QList<HTMLSpellCheck::MisspelledWord> check_spelling = HTMLSpellCheck::GetMisspelledWords(text, 0, text.count(), search_regex);
+    SPCRE *spcre = PCRECache::instance().getObject(search_regex);
+    QList<HTMLSpellCheck::MisspelledWord> check_spelling = HTMLSpellCheck::GetMisspelledWords(text, 0, text.length(), search_regex);
     foreach(HTMLSpellCheck::MisspelledWord misspelled_word, check_spelling) {
         SPCRE::MatchInfo match_info = spcre->getFirstMatchInfo(misspelled_word.text);
 
@@ -220,4 +232,42 @@ std::tuple<QString, int> SearchOperations::PerformHTMLSpellCheckReplace(const QS
 void SearchOperations::Accumulate(int &first, const int &second)
 {
     first += second;
+}
+
+
+int SearchOperations::FunctionReplaceInAllFiles(const QString &search_regex,
+                                                const QString &function_name,
+                                                QList<Resource *> resources)
+{
+    QProgressDialog progress(QObject::tr("Replacing search term..."), 0, 0, resources.count(), Utility::GetMainWindow());
+    progress.setMinimumDuration(PROGRESS_BAR_MINIMUM_DURATION);
+    int progress_value = 0;
+    progress.setValue(progress_value);
+    PythonRoutines pr;
+    PyObjectPtr fsp = pr.SetupInitialFunctionSearchEnvInPython(function_name);
+
+    foreach(Resource * resource, resources) {
+       progress.setValue(progress_value++);
+        qApp->processEvents();
+        QString bookpath = resource->GetRelativePath();
+        HTMLResource *html_resource = qobject_cast<HTMLResource *>(resource);
+        TextResource *text_resource = qobject_cast<TextResource *>(resource);
+        if (html_resource) {
+            QWriteLocker locker(&html_resource->GetLock());
+            QString text = html_resource->GetText();
+            QString new_text = pr.DoFunctionSearchTextReplacementsInPython(fsp, search_regex, bookpath, text);
+            if (new_text != text) {
+                html_resource->SetText(new_text);
+            }
+        } else if (text_resource) {
+            QWriteLocker locker(&text_resource->GetLock());
+            QString text = text_resource->GetText();
+            QString new_text = pr.DoFunctionSearchTextReplacementsInPython(fsp, search_regex, bookpath, text);
+            if (new_text != text) {
+                text_resource->SetText(new_text);
+            }
+        }
+    }
+    int count = pr.GetCurrentReplacementCountInPython(fsp);
+    return count;
 }

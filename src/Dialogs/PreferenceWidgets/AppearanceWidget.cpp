@@ -1,7 +1,7 @@
 /************************************************************************
 **
-**  Copyright (C) 2016-2021  Kevin B. Hendricks, Stratford, ON
-**  Copyright (C) 2016-2020  Doug Massay
+**  Copyright (C) 2016-2025  Kevin B. Hendricks, Stratford, ON
+**  Copyright (C) 2016-2025  Doug Massay
 **  Copyright (C) 2011-2013  John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012-2013  Grant Drake
 **
@@ -27,7 +27,9 @@
 #include <QtWidgets/QListWidget>
 #include <QtGui/QPainter>
 #include <QtWidgets/QStyledItemDelegate>
-#include <QtWebEngineWidgets/QWebEngineSettings>
+#include <QtWebEngineWidgets>
+#include <QtWebEngineCore>
+#include <QWebEngineSettings>
 #include <QFontDialog>
 #include <QFileInfo>
 
@@ -78,17 +80,18 @@ public:
 
 AppearanceWidget::AppearanceWidget()
     :
-    m_currentColor(QColor()),
-    m_isHighDPIComboEnabled(true)
+    m_currentColor(QColor())
 {
 
-#ifdef Q_OS_MAC
-    // Disable the HighDPI combobox on Mac
-    // Effectively an isMacOS runtime check
-    m_isHighDPIComboEnabled = false;
-#endif
-
     ui.setupUi(this);
+// Hide the Windows only preference from all other OSes
+#ifndef Q_OS_WIN32
+    ui.grpCustomDarkStyle->setVisible(false);
+#endif
+#ifdef Q_OS_MAC
+    // according to macos user interface guidelines native apps would use TicksBelow
+    ui.iconSizeSlider->setTickPosition(QSlider::TicksBelow);
+#endif
     ui.Default->setEnabled(true);
     ui.Fluent->setEnabled(true);
     ui.Material->setEnabled(true);
@@ -108,23 +111,6 @@ AppearanceWidget::AppearanceWidget()
     
     // Custom delegate for painting the color swatches
     ui.codeViewColorsList->setItemDelegate(new ColorSwatchDelegate(ui.codeViewColorsList));
-    ui.comboHighDPI->addItems({tr("Detect"), tr("On"), tr("Off")});
-    QString highdpi_tooltip = "<p><dt><b>" + tr("Detect") + "</b><dd>" + tr("Detect whether any high dpi scaling should take place.");
-    highdpi_tooltip += " " + tr("Defers to any Qt environment variables that are set to control high dpi behavior.") + "</dd>";
-    highdpi_tooltip += "<dt><b>" + tr("On") + "</b><dd>" + tr("Turns on high dpi scaling and ignores any Qt environment variables");
-    highdpi_tooltip += " " + tr("that are set controlling high dpi behavior.") + "</dd>";
-    highdpi_tooltip += "<dt><b>" + tr("Off") + "</b><dd>" + tr("Turns off high dpi scaling regardless if any Qt environment");
-    highdpi_tooltip += " " + tr("variables controlling high dpi behavior are set.") + "</dd>";
-    ui.comboHighDPI->setToolTip(highdpi_tooltip);
-    // The HighDPI setting is unused/unnecessary on Mac
-    ui.comboHighDPI->setEnabled(m_isHighDPIComboEnabled);
-    QString drag_tweak_tooltip = "<p>" + tr("Adjust the distance necessary to drag an item before a move event is triggered.");
-    drag_tweak_tooltip += "<p>" + tr("-20 to +20 pixel range");
-    ui.dragTweakSpinBox->setToolTip(drag_tweak_tooltip);
-    ui.dragTweakSpinBox->setMinimum(-20);
-    ui.dragTweakSpinBox->setMaximum(20);
-    // The Drag start-distance setting is unused/unnecessary on Mac
-    ui.dragTweakSpinBox->setEnabled(m_isHighDPIComboEnabled);
     ui.chkHightlightTags->setToolTip("<p>" + tr("Highlight matching tags in Code View when cursor is inside tags."));
     m_codeViewAppearance = readSettings();
     loadCodeViewColorsList(m_codeViewAppearance);
@@ -138,6 +124,11 @@ PreferencesWidget::ResultActions AppearanceWidget::saveSettings()
     settings.setAppearancePrefsTabIndex(ui.tabAppearance->currentIndex());
     settings.setShowFullPathOn(ui.ShowFullPath->isChecked() ? 1 : 0);
     settings.setPreviewDark(ui.PreviewDarkInDM->isChecked() ? 1 : 0);
+    settings.setUIHighlightFocusWidget(ui.chkFocusDec->isChecked() ? 1 : 0);
+    settings.setAutomateShowMenu(ui.chkShowAuto->isChecked() ? 1 : 0);
+    settings.setUiDoubleWidthTextCursor(ui.chkDoubleWidthCursor->isChecked() ? 1 : 0);
+    // This setting has no effect on other OSes, but it won't hurt to set it.
+    settings.setUiUseCustomSigilDarkTheme(ui.chkDarkStyle->isChecked() ? 1 : 0);
     // handle icon theme
     QString icon_theme = "main";
     if (ui.Fluent->isChecked()) {
@@ -148,11 +139,6 @@ PreferencesWidget::ResultActions AppearanceWidget::saveSettings()
         icon_theme = "custom";
     }
     settings.setUIIconTheme(icon_theme);
-    // Don't try to get the index of a disabled combobox
-    if (m_isHighDPIComboEnabled) {
-        settings.setHighDPI(ui.comboHighDPI->currentIndex());
-        settings.setUiDragDistanceTweak(ui.dragTweakSpinBox->value());
-    }
     settings.setUIFont(m_currentUIFont);
     SettingsStore::PreviewAppearance PVAppearance;
     PVAppearance.font_family_standard     = ui.cbPreviewFontStandard->currentText();
@@ -196,7 +182,7 @@ PreferencesWidget::ResultActions AppearanceWidget::saveSettings()
     settings.setSpecialCharacterAppearance(specialCharacterAppearance);
     settings.setMainMenuIconSize(double(ui.iconSizeSlider->value())/10);
     // PV settings can be globally changed and will take effect immediately
-    QWebEngineSettings *web_settings = QWebEngineSettings::defaultSettings();
+    QWebEngineSettings *web_settings = QWebEngineProfile::defaultProfile()->settings();
     web_settings->setFontSize(QWebEngineSettings::DefaultFontSize,   PVAppearance.font_size);
     web_settings->setFontFamily(QWebEngineSettings::StandardFont,    PVAppearance.font_family_standard);
     web_settings->setFontFamily(QWebEngineSettings::SerifFont,       PVAppearance.font_family_serif);
@@ -239,18 +225,24 @@ PreferencesWidget::ResultActions AppearanceWidget::saveSettings()
     if (m_currentIconTheme != icon_theme) {
         results = results | PreferencesWidget::ResultAction_RestartSigil;
     }
-    // Don't try to get the index of a disabled combobox
-    if (m_isHighDPIComboEnabled) {
-        if (m_HighDPI != (ui.comboHighDPI->currentIndex())) {
-            results = results | PreferencesWidget::ResultAction_RestartSigil;
-        }
-        if (m_DragTweak != (ui.dragTweakSpinBox->value())) {
-            results = results | PreferencesWidget::ResultAction_RestartSigil;
-        }
-    }
     if ((m_currentUIFont != m_initUIFont) || m_uiFontResetFlag) {
         results = results | PreferencesWidget::ResultAction_RestartSigil;
     }
+    // if show widget focus highlight pref changed, set need for restart
+    if (m_ShowWidgetFocus != (ui.chkFocusDec->isChecked() ? 1 : 0)) {
+        results = results | PreferencesWidget::ResultAction_RestartSigil;
+    }
+    // if double width text cursor pref changed, set need for restart
+    if (m_DoubleWidthCursor != (ui.chkDoubleWidthCursor->isChecked() ? 1 : 0)) {
+        results = results | PreferencesWidget::ResultAction_RestartSigil;
+    }
+    // if dark style changed on Windows, set need for restart.
+    // This setting has no effect on other OSes so no need to prompt for a restart.
+#ifdef Q_OS_WIN32
+    if (m_UseCustomSigilDarkTheme != (ui.chkDarkStyle->isChecked() ? 1 : 0)) {
+        results = results | PreferencesWidget::ResultAction_RestartSigil;
+    }
+#endif
     m_uiFontResetFlag = false;
     results = results & PreferencesWidget::ResultAction_Mask;
     return results;
@@ -262,6 +254,14 @@ SettingsStore::CodeViewAppearance AppearanceWidget::readSettings()
     ui.tabAppearance->setCurrentIndex(settings.appearancePrefsTabIndex());
     m_ShowFullPathOn = settings.showFullPathOn();
     ui.ShowFullPath->setChecked(settings.showFullPathOn());
+    m_ShowWidgetFocus = settings.uiHighlightFocusWidgetEnabled();
+    ui.chkFocusDec->setChecked(settings.uiHighlightFocusWidgetEnabled());
+    ui.chkShowAuto->setChecked(settings.automateShowMenu());
+    m_DoubleWidthCursor = settings.uiDoubleWidthTextCursor();
+    ui.chkDoubleWidthCursor->setChecked(settings.uiDoubleWidthTextCursor());
+    // This setting has no effect on other OSes, but it won't hurt to read it.
+    m_UseCustomSigilDarkTheme = settings.uiUseCustomSigilDarkTheme();
+    ui.chkDarkStyle->setChecked(settings.uiUseCustomSigilDarkTheme());
 
     // Handle Icon Theme
     QString icon_theme = settings.uiIconTheme();
@@ -277,13 +277,6 @@ SettingsStore::CodeViewAppearance AppearanceWidget::readSettings()
     ui.Default->setChecked(icon_theme == "main");
     ui.Fluent->setChecked(icon_theme == "fluent");
     ui.Material->setChecked(icon_theme == "material");
-    // Don't try to set the index of disabled widgets
-    if (m_isHighDPIComboEnabled) {
-        m_HighDPI = settings.highDPI();
-        ui.comboHighDPI->setCurrentIndex(m_HighDPI);
-        m_DragTweak = settings.uiDragDistanceTweak();
-        ui.dragTweakSpinBox->setValue(m_DragTweak);
-    }
     if (!settings.uiFont().isEmpty()) {
         m_initUIFont = settings.uiFont();
     } else {

@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2020-2021 Kevin B. Hendricks Stratford, ON, Canada 
+**  Copyright (C) 2020-2024 Kevin B. Hendricks Stratford, ON, Canada 
 **
 **  This file is part of Sigil.
 **
@@ -22,12 +22,13 @@
 #ifndef QUICK_PARSER
 #define QUICK_PARSER
 
+#include <QStringList>
+#include <QStringView>
+
 #include "Parsers/TagAtts.h"
 
 class TagAtts;
 class QString;
-class QStringRef;
-class QStringList;
  
 class QuickParser
 {
@@ -50,11 +51,11 @@ public:
     QString serialize_markup(const MarkupInfo &mi);
     
 private:
-    QStringRef parseML();
-    void parseTag(const QStringRef &tagstring, MarkupInfo &mi);
+    QStringView parseML();
+    void parseTag(const QStringView tagstring, MarkupInfo &mi);
     int findTarget(const QString &tgt, int p, bool after=false);
-    int skipAnyBlanks(const QStringRef &segment, int p);
-    int stopWhenContains(const QStringRef &segment, const QString& stopchars, int p);
+    int skipAnyBlanks(const QStringView segment, int p);
+    int stopWhenContains(const QStringView segment, const QString& stopchars, int p);
     
     QString      m_source;
     int          m_pos;

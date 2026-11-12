@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim:ts=4:sw=4:softtabstop=4:smarttab:expandtab
 
-# Copyright (c) 2015-2020 Kevin B. Hendricks, and Doug Massay
+# Copyright (c) 2015-2025 Kevin B. Hendricks, and Doug Massay
 # Copyright (c) 2014      Kevin B. Hendricks, John Schember, and Doug Massay
 # All rights reserved.
 #
@@ -90,3 +90,11 @@ class InputContainer(object):
     #    "Window", "Base", "Text", "Highlight", "HighlightedText"
     def color(self, role):
         return self._w.color(role)
+
+
+    # Newly Added to Support Plugins running in Automate Lists
+    def using_automate(self):
+        return self._w.using_automate
+
+    def	automate_parameter(self):
+        return self._w.automate_parameter

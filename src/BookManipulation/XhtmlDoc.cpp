@@ -26,11 +26,9 @@
 #include <QtCore/QHash>
 #include <QtCore/QList>
 #include <QtCore/QString>
-#include <QtCore/QXmlStreamReader>
+#include <QXmlStreamReader>
 // #include <QtWebKitWidgets/QWebFrame>
 // #include <QtWebKitWidgets/QWebPage>
-#include <QtXml/QXmlInputSource>
-#include <QtXml/QXmlSimpleReader>
 #include <QRegularExpression>
 #include <QRegularExpressionMatch>
 #include <QDir>
@@ -134,14 +132,13 @@ QList<XhtmlDoc::XMLElement> XhtmlDoc::GetTagsInHead(const QString &source, const
         reader.readNext();
 
         if (reader.isStartElement()) {
-            if (reader.name() == "head" || reader.name() == "HEAD") {
+            if (reader.name().compare(QLatin1String("head"),Qt::CaseInsensitive) == 0) {
                 in_head = true;
-            } else if (in_head && reader.name() == tag_name) {
+            } else if (in_head && reader.name().compare(tag_name) == 0) {
                 matching_elements.append(CreateXMLElement(reader));
             }
         } else if (reader.isEndElement() &&
-                   (reader.name() == "head" || reader.name() == "HEAD")
-                  ) {
+                   (reader.name().compare(QLatin1String("head"),Qt::CaseInsensitive) == 0)) {
             break;
         }
     }
@@ -169,7 +166,7 @@ QList<XhtmlDoc::XMLElement> XhtmlDoc::GetTagsInDocument(const QString &source, c
         reader.readNext();
 
         if (reader.isStartElement() &&
-            reader.name() == tag_name) {
+            (reader.name().compare(tag_name) == 0)) {
             matching_elements.append(CreateXMLElement(reader));
         }
     }
@@ -200,6 +197,30 @@ QList<QString> XhtmlDoc::GetAllDescendantClasses(const QString & source)
         }
     }
     return classes;
+}
+
+
+int XhtmlDoc::GetFirstUseOfClass(const QString& source, const QString& class_name_to_find)
+{
+    QString version = "any_version";
+    int line_no = -1;
+    GumboInterface gi = GumboInterface(source, version);
+    QList<GumboNode*> nodes = gi.get_all_nodes_with_attribute(QString("class"));
+    foreach(GumboNode * node, nodes) {
+        QString element_name = QString::fromStdString(gi.get_tag_name(node));
+        GumboAttribute* attr = gumbo_get_attribute(&node->v.element.attributes, "class");
+        if (attr) {
+            QString class_values = QString::fromUtf8(attr->value);
+            foreach(QString class_name, class_values.split(" ")) {
+                if (class_name_to_find == class_name) {
+                    // need to compensate for stripped xml header line
+                    line_no = node->v.element.start_pos.line + 1;
+                    return line_no;
+                }
+            }
+        }
+    }
+    return line_no;
 }
 
 
@@ -293,9 +314,9 @@ XhtmlDoc::WellFormedError XhtmlDoc::WellFormedErrorForSource(const QString &sour
         reader.readNext();
         if (reader.isDTD()) ndoctypes++;
         if (reader.isStartElement()) {
-            if (reader.name() == "html") nhtmltags++;
-            if (reader.name() == "head") nheadtags++;
-            if (reader.name() == "body") nbodytags++;
+            if (reader.name().compare(QLatin1String("html")) == 0) nhtmltags++;
+            if (reader.name().compare(QLatin1String("head")) == 0) nheadtags++;
+            if (reader.name().compare(QLatin1String("body")) == 0) nbodytags++;
         }
     }
     if (reader.hasError()) {
@@ -453,6 +474,7 @@ QStringList XhtmlDoc::GetLinkedJavascripts(const QString &source)
     foreach(XhtmlDoc::XMLElement element, script_tag_nodes) {
         if (element.attributes.contains("type") &&
             ((element.attributes.value("type").toLower() == "text/javascript") ||
+             (element.attributes.value("type").toLower() == "text/ecmascript") ||
              (element.attributes.value("type").toLower() == "application/javascript"))
             && element.attributes.contains("src")) {
             linked_js_paths.append(element.attributes.value("src"));
@@ -682,11 +704,17 @@ QStringList XhtmlDoc::GetAllMediaPathsFromMediaChildren(const QString & source, 
     QList<GumboNode*> nodes = gi.get_all_nodes_with_tags(tags);
     for (int i = 0; i < nodes.count(); ++i) {
         GumboNode* node = nodes.at(i);
+        // each element node will only hold one of the following attributes
         GumboAttribute* attr = gumbo_get_attribute(&node->v.element.attributes, "src");
         if (!attr) {
-            // search for xlink:href using gumbo attribute namespace
+            // search for xlink:href or href using gumbo attribute namespace
             attr = gumbo_get_attribute(&node->v.element.attributes, "href");
-            if (attr && attr->attr_namespace != GUMBO_ATTR_NAMESPACE_XLINK) attr = NULL;
+            if (attr && node->v.element.tag != GUMBO_TAG_IMAGE) attr = NULL;
+        }
+        if (!attr) {
+            // search for altimg attribute from math tag
+            attr = gumbo_get_attribute(&node->v.element.attributes, "altimg");
+            if (attr && node->v.element.tag != GUMBO_TAG_MATH) attr = NULL;
         }
         if (attr) {
             QString relative_path = QString::fromUtf8(attr->value);

@@ -1,6 +1,6 @@
 /************************************************************************
 **
-**  Copyright (C) 2015-2021 Kevin B. Hendricks, Stratford, Ontario
+**  Copyright (C) 2015-2026 Kevin B. Hendricks, Stratford, Ontario
 **  Copyright (C) 2012      John Schember <john@nachtimwald.com>
 **  Copyright (C) 2012-2013 Dave Heiland
 **
@@ -67,8 +67,17 @@ void AllFilesWidget::SetupTable(int sort_column, Qt::SortOrder sort_order)
 {
     // Need to rebuild m_AllResources since deletes can happen behind the scenes
     m_AllResources = m_Book->GetAllResources();
-    QString version = m_Book->GetOPF()->GetEpubVersion();
     m_ItemModel->clear();
+    QHash<QString, QStringList> semantic_names;
+    QHash<QString, QString> manifest_properties;
+    QString version = m_Book->GetOPF()->GetEpubVersion();
+    if (version.startsWith('3')) {
+        NavProcessor navproc(m_Book->GetConstOPF()->GetNavResource());
+        semantic_names = navproc.GetLandmarkNameForPaths();
+        manifest_properties = m_Book->GetOPF()->GetManifestPropertiesForPaths();
+    } else {
+        semantic_names = m_Book->GetOPF()->GetGuideSemanticNameForPaths();
+    }
     QStringList header;
     header.append(tr("Directory"));
     header.append(tr("Name"));
@@ -104,7 +113,7 @@ void AllFilesWidget::SetupTable(int sort_column, Qt::SortOrder sort_order)
         // File Size
         double ffsize = QFile(fullpath).size() / 1024.0;
         total_size += ffsize;
-        QString fsize = QString::number(ffsize, 'f', 2);
+        QString fsize = QLocale().toString(ffsize, 'f', 2);
         NumericItem *size_item = new NumericItem();
         size_item->setText(fsize);
         size_item->setTextAlignment(Qt::AlignRight);
@@ -115,17 +124,16 @@ void AllFilesWidget::SetupTable(int sort_column, Qt::SortOrder sort_order)
         rowItems << item;
         // Semantics
         item = new QStandardItem();
-        if (version.startsWith('3')) {
-            NavProcessor navproc(m_Book->GetConstOPF()->GetNavResource());
-            item->setText(navproc.GetLandmarkNameForResource(resource));
-        } else {
-            item->setText(m_Book->GetOPF()->GetGuideSemanticNameForResource(resource));
-        }
+        QStringList semlist = semantic_names.value(filepath, QStringList());
+        QString semvals = "";
+        if (!semlist.isEmpty()) semvals = semlist.join(",");
+        item->setText(semvals);
         rowItems << item;
         // Manifest Properties
         if (version.startsWith('3')) {
+            QString mprops = manifest_properties.value(filepath, QString());
             item = new QStandardItem();
-            item->setText(m_Book->GetOPF()->GetManifestPropertiesForResource(resource));
+            item->setText(mprops);
             rowItems << item;
         }
         // Add item to table
@@ -250,10 +258,7 @@ void AllFilesWidget::Save()
     QString filter_string = "*.csv;;*.txt;;*.*";
     QString default_filter = "";
     QString save_path = m_LastDirSaved + "/" + m_LastFileSaved;
-    QFileDialog::Options options = QFileDialog::Options();
-#ifdef Q_OS_MAC
-    options = options | QFileDialog::DontUseNativeDialog;
-#endif
+    QFileDialog::Options options = Utility::DlgOptions();
 
     QString destination = QFileDialog::getSaveFileName(this,
                                                        tr("Save Report As Comma Separated File"),
@@ -269,7 +274,7 @@ void AllFilesWidget::Save()
     try {
         Utility::WriteUnicodeTextFile(data, destination);
     } catch (CannotOpenFile&) {
-        QMessageBox::warning(this, tr("Sigil"), tr("Cannot save report file."));
+        Utility::warning(this, tr("Sigil"), tr("Cannot save report file."));
     }
 
     m_LastDirSaved = QFileInfo(destination).absolutePath();
@@ -305,6 +310,11 @@ QString AllFilesWidget::GetType(Resource *resource)
 
         case Resource::VideoResourceType: {
             type = tr("Video");
+            break;
+        }
+
+        case Resource::PdfResourceType: {
+            type = tr("PDF");
             break;
         }
 
